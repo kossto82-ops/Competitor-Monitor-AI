@@ -1,0 +1,26 @@
+{
+  "name": "competitor-monitor-ai",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:generate": "npm run generate --workspace packages/db",
+    "db:migrate": "npm run migrate:dev --workspace packages/db",
+    "worker:enqueue": "npm run enqueue --workspace apps/worker",
+    "worker:start": "npm run start --workspace apps/worker"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4",
+    "@types/node": "^22.9.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

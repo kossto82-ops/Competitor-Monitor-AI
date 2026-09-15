@@ -1,0 +1,379 @@
+// Competitor Monitor AI - Phase 1 schema.
+//
+// Every tenant-owned table carries `organizationId` directly (denormalized,
+// not just reachable via a join) so that:
+//   1. every read/write path can be scoped with a single `WHERE organizationId = ?`
+//      instead of relying on a correct chain of joins,
+//   2. Postgres row-level security can be added later without a schema change,
+//   3. the automated tenant-isolation tests have one column to check everywhere.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums (kept in sync by hand with packages/core/src/enums.ts - see that file)
+// ---------------------------------------------------------------------------
+
+enum Plan {
+  STARTER
+  PRO
+  BUSINESS
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum UrlCategory {
+  PRODUCT_PAGE
+  PRICING_PAGE
+  GENERAL
+}
+
+enum ExtractionMethod {
+  HTTP
+  CHEERIO
+  PLAYWRIGHT
+  BROWSER_USE
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum VerificationState {
+  CHANGED
+  NO_CHANGE
+  FAILED_TO_VERIFY
+}
+
+enum ChangeType {
+  PRICE_CHANGE
+  PRODUCT_ADDED
+  PRODUCT_REMOVED
+  PROMOTION_CHANGE
+  CONTENT_CHANGE
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum EntityType {
+  PRICE
+  PRODUCT
+  PLAN
+  PROMOTION
+  GENERIC
+}
+
+// Not written to yet in Phase 1 - the AiAnalysis table exists so the
+// ChangeEvent -> AiAnalysis relation doesn't require a migration later
+// that touches already-populated ChangeEvent rows.
+enum AiAnalysisStatus {
+  SUCCESS
+  FAILED
+  TIMEOUT
+  SKIPPED
+}
+
+enum NotificationChannel {
+  EMAIL
+}
+
+enum NotificationStatus {
+  SENT
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Tenant root
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  plan      Plan     @default(STARTER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  competitors  Competitor[]
+  usageRecords UsageRecord[]
+  reports      Report[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String   @unique
+  passwordHash   String
+  name           String?
+  role           UserRole @default(OWNER)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Competitors & monitored pages
+// ---------------------------------------------------------------------------
+
+model Competitor {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  website        String?
+  notes          String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  monitoredUrls MonitoredUrl[]
+
+  @@index([organizationId])
+  @@map("competitors")
+}
+
+model MonitoredUrl {
+  id             String @id @default(cuid())
+  organizationId String
+  competitorId   String
+  competitor     Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  url                     String
+  label                   String?
+  category                UrlCategory @default(GENERAL)
+  scanFrequencyMinutes    Int         @default(1440)
+  // Escalation flags for later tiers - read but not acted on by Phase 1's
+  // pipeline (only HttpExtractor/CheerioExtractor exist so far).
+  requiresJs              Boolean     @default(false)
+  requiresInteraction     Boolean     @default(false)
+  isActive                Boolean     @default(true)
+  lastSuccessfulScanAt    DateTime?
+  consecutiveFailureCount Int         @default(0)
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  monitoringJobs MonitoringJob[]
+  snapshots      Snapshot[]
+  changeEvents   ChangeEvent[]
+
+  @@index([organizationId])
+  @@index([competitorId])
+  @@map("monitored_urls")
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring pipeline
+// ---------------------------------------------------------------------------
+
+model MonitoringJob {
+  id             String @id @default(cuid())
+  organizationId String
+  monitoredUrlId String
+  monitoredUrl   MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+
+  status       JobStatus @default(PENDING)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+
+  snapshot    Snapshot?
+  usageRecord UsageRecord?
+
+  @@index([organizationId])
+  @@index([monitoredUrlId, createdAt])
+  @@index([status])
+  @@map("monitoring_jobs")
+}
+
+model Snapshot {
+  id              String @id @default(cuid())
+  organizationId  String
+  monitoredUrlId  String
+  monitoredUrl    MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+  monitoringJobId String       @unique
+  monitoringJob   MonitoringJob @relation(fields: [monitoringJobId], references: [id], onDelete: Cascade)
+
+  fetchedAt         DateTime @default(now())
+  extractionMethod  ExtractionMethod
+  httpStatus        Int?
+  finalUrl          String?
+  verificationState VerificationState
+  errorMessage      String?
+
+  normalizedContent  String
+  contentHash        String?
+  structuredDataHash String?
+  confidence         Float
+  warnings           Json     @default("[]")
+
+  extractedEntities      ExtractedEntity[]
+  changeEventsAsCurrent  ChangeEvent[]     @relation("CurrentSnapshot")
+  changeEventsAsPrevious ChangeEvent[]     @relation("PreviousSnapshot")
+
+  @@index([organizationId])
+  @@index([monitoredUrlId, fetchedAt])
+  @@map("snapshots")
+}
+
+model ExtractedEntity {
+  id         String   @id @default(cuid())
+  snapshotId String
+  snapshot   Snapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  type     EntityType
+  key      String
+  label    String
+  value    String?
+  currency String?
+  raw      String
+
+  @@index([snapshotId])
+  @@index([key])
+  @@map("extracted_entities")
+}
+
+model ChangeEvent {
+  id             String @id @default(cuid())
+  organizationId String
+  monitoredUrlId String
+  monitoredUrl   MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+
+  previousSnapshotId String?
+  previousSnapshot   Snapshot? @relation("PreviousSnapshot", fields: [previousSnapshotId], references: [id], onDelete: SetNull)
+  currentSnapshotId  String
+  currentSnapshot    Snapshot  @relation("CurrentSnapshot", fields: [currentSnapshotId], references: [id], onDelete: Cascade)
+
+  changeType       ChangeType
+  severity         Severity
+  confidence       Float
+  entityKey        String?
+  fieldPath        String
+  oldValue         String?
+  newValue         String?
+  currency         String?
+  percentageChange Float?
+  evidenceExcerpt  String
+  detectedAt       DateTime @default(now())
+
+  aiAnalysis AiAnalysis?
+
+  @@index([organizationId])
+  @@index([monitoredUrlId, detectedAt])
+  @@map("change_events")
+}
+
+// ---------------------------------------------------------------------------
+// Downstream stages - tables exist for the relation shape, Phase 1 does not
+// write to them (no AI calls, no reports, no notifications sent yet).
+// ---------------------------------------------------------------------------
+
+model AiAnalysis {
+  id            String @id @default(cuid())
+  changeEventId String @unique
+  changeEvent   ChangeEvent @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
+
+  status                    AiAnalysisStatus
+  summary                   String?
+  category                  String?
+  businessImpact            String?
+  competitiveInterpretation String?
+  speculation               String?
+  facts                     Json             @default("[]")
+  recommendedAttention      Boolean          @default(false)
+  providerModel             String?
+  promptTokens              Int?
+  completionTokens          Int?
+  costUsd                   Float?
+  createdAt                 DateTime         @default(now())
+
+  @@map("ai_analyses")
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  reportDate          DateTime
+  generatedAt         DateTime @default(now())
+  competitorsChecked  Int
+  urlsChecked         Int
+  successfulScans     Int
+  failedScans         Int
+  highSeverityCount   Int
+  mediumSeverityCount Int
+  lowSeverityCount    Int
+  noChangeCount       Int
+
+  notifications NotificationLog[]
+
+  @@unique([organizationId, reportDate])
+  @@map("reports")
+}
+
+model NotificationLog {
+  id             String  @id @default(cuid())
+  organizationId String
+  reportId       String?
+  report         Report? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  channel      NotificationChannel
+  recipient    String
+  status       NotificationStatus
+  sentAt       DateTime?
+  errorMessage String?
+  createdAt    DateTime            @default(now())
+
+  @@index([organizationId])
+  @@map("notification_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Cost tracking (Section 8 of the brief) - one row per MonitoringJob,
+// written regardless of whether the job succeeded or failed.
+// ---------------------------------------------------------------------------
+
+model UsageRecord {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  monitoringJobId String?        @unique
+  monitoringJob   MonitoringJob? @relation(fields: [monitoringJobId], references: [id], onDelete: SetNull)
+
+  extractionMethod   ExtractionMethod?
+  browserEscalated   Boolean           @default(false)
+  aiCallMade         Boolean           @default(false)
+  aiPromptTokens     Int?
+  aiCompletionTokens Int?
+  fetchSucceeded     Boolean
+  processingTimeMs   Int
+  createdAt          DateTime          @default(now())
+
+  @@index([organizationId, createdAt])
+  @@map("usage_records")
+}

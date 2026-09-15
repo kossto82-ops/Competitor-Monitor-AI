@@ -1,0 +1,27 @@
+{
+  "name": "@cma/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "enqueue": "tsx src/enqueueAll.ts"
+  },
+  "dependencies": {
+    "@cma/core": "*",
+    "@cma/db": "*",
+    "@cma/detection": "*",
+    "@cma/extraction": "*",
+    "@cma/queue": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
