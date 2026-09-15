@@ -10,3 +10,4 @@ export * from "./repositories/monitoringPipeline.js";
 export * from "./repositories/changeEvents.js";
 export * from "./repositories/usage.js";
 export * from "./repositories/reports.js";
+export * from "./repositories/dashboard.js";

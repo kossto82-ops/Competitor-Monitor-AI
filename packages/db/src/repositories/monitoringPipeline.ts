@@ -7,6 +7,35 @@ export async function createRunningMonitoringJob(organizationId: string, monitor
   });
 }
 
+/**
+ * Phase 2 addition: creates the MonitoringJob row as PENDING at the
+ * moment the API enqueues a scan, before the worker ever picks it up -
+ * without this, there is a real window (the time a job sits in the
+ * BullMQ queue) where no DB row exists yet, and the dashboard has
+ * nothing stable to poll to show a "Queued" state. The row's id is
+ * threaded through the BullMQ payload so the worker updates this same
+ * row (see markMonitoringJobRunning) instead of creating a second one.
+ */
+export async function createPendingMonitoringJob(organizationId: string, monitoredUrlId: string) {
+  return prisma.monitoringJob.create({
+    data: { organizationId, monitoredUrlId, status: "PENDING" },
+  });
+}
+
+export async function markMonitoringJobRunning(jobId: string) {
+  return prisma.monitoringJob.update({
+    where: { id: jobId },
+    data: { status: "RUNNING", startedAt: new Date() },
+  });
+}
+
+export async function getMonitoringJobForOrg(organizationId: string, jobId: string) {
+  return prisma.monitoringJob.findFirst({
+    where: { id: jobId, organizationId },
+    include: { monitoredUrl: { select: { url: true, label: true, competitorId: true } } },
+  });
+}
+
 export interface PersistMonitoringResultInput {
   organizationId: string;
   monitoredUrlId: string;

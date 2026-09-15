@@ -56,6 +56,7 @@ export interface PipelineDeps {
   getMonitoredUrlForOrg: (organizationId: string, monitoredUrlId: string) => Promise<MonitoredUrlLike>;
   getLatestVerifiedSnapshot: (monitoredUrlId: string) => Promise<PriorSnapshotLike | null>;
   createRunningMonitoringJob: (organizationId: string, monitoredUrlId: string) => Promise<{ id: string }>;
+  markMonitoringJobRunning: (jobId: string) => Promise<{ id: string }>;
   persistMonitoringResult: (
     jobId: string,
     input: {
@@ -75,6 +76,7 @@ export function createDefaultPipelineDeps(): PipelineDeps {
     getMonitoredUrlForOrg: db.getMonitoredUrlForOrg,
     getLatestVerifiedSnapshot: db.getLatestVerifiedSnapshot,
     createRunningMonitoringJob: db.createRunningMonitoringJob,
+    markMonitoringJobRunning: db.markMonitoringJobRunning,
     persistMonitoringResult: db.persistMonitoringResult,
   };
 }
@@ -97,7 +99,9 @@ export async function runMonitoringJob(
 ): Promise<RunMonitoringJobResult> {
   const monitoredUrl = await deps.getMonitoredUrlForOrg(payload.organizationId, payload.monitoredUrlId);
 
-  const job = await deps.createRunningMonitoringJob(monitoredUrl.organizationId, monitoredUrl.id);
+  const job = payload.monitoringJobId
+    ? await deps.markMonitoringJobRunning(payload.monitoringJobId)
+    : await deps.createRunningMonitoringJob(monitoredUrl.organizationId, monitoredUrl.id);
 
   const priorSnapshot = await deps.getLatestVerifiedSnapshot(monitoredUrl.id);
   const prior: PriorSnapshotData | null = priorSnapshot

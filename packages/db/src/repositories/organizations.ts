@@ -28,3 +28,12 @@ export async function findUserByEmail(email: string) {
 export async function getOrganizationById(organizationId: string) {
   return prisma.organization.findUnique({ where: { id: organizationId } });
 }
+
+/**
+ * Scoped by organizationId even though `id` alone is already unique -
+ * the same "never trust a single id without also checking tenant
+ * ownership" discipline as every other repository function here.
+ */
+export async function getUserForOrg(organizationId: string, userId: string) {
+  return prisma.user.findFirst({ where: { id: userId, organizationId } });
+}

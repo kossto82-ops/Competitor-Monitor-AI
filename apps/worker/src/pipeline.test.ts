@@ -30,6 +30,7 @@ function makeDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
     }),
     getLatestVerifiedSnapshot: vi.fn().mockResolvedValue(null),
     createRunningMonitoringJob: vi.fn().mockResolvedValue({ id: "job-1" }),
+    markMonitoringJobRunning: vi.fn().mockResolvedValue({ id: "pending-job-1" }),
     persistMonitoringResult: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -40,6 +41,27 @@ describe("runMonitoringJob", () => {
     const deps = makeDeps();
     await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
     expect(deps.getMonitoredUrlForOrg).toHaveBeenCalledWith("org-1", "url-1");
+  });
+
+  it("uses the pre-created MonitoringJob row (payload.monitoringJobId) instead of creating a new one, when present", async () => {
+    const deps = makeDeps();
+    const result = await runMonitoringJob(
+      { organizationId: "org-1", monitoredUrlId: "url-1", monitoringJobId: "pending-job-1" },
+      deps,
+    );
+
+    expect(deps.markMonitoringJobRunning).toHaveBeenCalledWith("pending-job-1");
+    expect(deps.createRunningMonitoringJob).not.toHaveBeenCalled();
+    expect(result.monitoringJobId).toBe("pending-job-1");
+    expect(deps.persistMonitoringResult).toHaveBeenCalledWith("pending-job-1", expect.anything());
+  });
+
+  it("falls back to creating a new MonitoringJob row when no monitoringJobId is on the payload (the CLI/enqueue-all path)", async () => {
+    const deps = makeDeps();
+    await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+
+    expect(deps.createRunningMonitoringJob).toHaveBeenCalledWith("org-1", "url-1");
+    expect(deps.markMonitoringJobRunning).not.toHaveBeenCalled();
   });
 
   it("treats the first successful extraction as a baseline (NO_CHANGE, zero change events)", async () => {

@@ -19,7 +19,7 @@ export async function listChangeEventsForOrg(organizationId: string, options: Li
     orderBy: { detectedAt: "desc" },
     take: options.limit ?? 50,
     include: {
-      monitoredUrl: { select: { url: true, label: true, competitorId: true } },
+      monitoredUrl: { select: { url: true, label: true, competitorId: true, competitor: { select: { name: true } } } },
       currentSnapshot: true,
       previousSnapshot: true,
     },
@@ -30,7 +30,7 @@ export async function getChangeEventForOrg(organizationId: string, changeEventId
   return prisma.changeEvent.findFirst({
     where: { id: changeEventId, organizationId },
     include: {
-      monitoredUrl: { select: { url: true, label: true, competitorId: true } },
+      monitoredUrl: { select: { url: true, label: true, competitorId: true, competitor: { select: { name: true } } } },
       currentSnapshot: { include: { extractedEntities: true } },
       previousSnapshot: { include: { extractedEntities: true } },
     },

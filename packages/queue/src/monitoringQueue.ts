@@ -6,6 +6,16 @@ export const MONITORING_QUEUE_NAME = "monitoring-jobs";
 export interface MonitoringJobPayload {
   organizationId: string;
   monitoredUrlId: string;
+  /**
+   * Phase 2 addition: when the API enqueues a scan, it creates the
+   * MonitoringJob row as PENDING first and passes its id here, so the
+   * worker updates that same row instead of creating a second one -
+   * this is what lets the dashboard poll a stable id through
+   * Queued -> Scanning -> Completed/Failed. Absent for the older
+   * "enqueue every active URL" CLI path, which still creates its job
+   * row only once the worker picks it up.
+   */
+  monitoringJobId?: string;
 }
 
 /**
