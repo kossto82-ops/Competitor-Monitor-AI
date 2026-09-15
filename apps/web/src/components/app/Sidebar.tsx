@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Building2, GitCompareArrows, Settings } from "lucide-react";
+import { LayoutDashboard, Building2, GitCompareArrows, Settings, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const NAV = [
@@ -10,6 +10,7 @@ const NAV = [
   { href: "/competitors", label: "Competitors", icon: Building2, section: "Monitoring" },
   { href: "/changes", label: "Changes", icon: GitCompareArrows },
   { href: "/settings/account", label: "Account", icon: Settings, section: "Settings" },
+  { href: "/settings/ai", label: "AI Provider", icon: Sparkles },
 ];
 
 export function Sidebar() {

@@ -1,5 +1,5 @@
 import { AiProviderRequestError, AiProviderTimeoutError } from "./errors.js";
-import type { AiProvider, AiProviderResult, ChangeAnalysisInput } from "./types.js";
+import type { AiProvider, ChangeAnalysisInput, NormalizedAiResponse } from "./types.js";
 
 function isRetryable(err: unknown): boolean {
   if (err instanceof AiProviderRequestError) return err.retryable;
@@ -17,7 +17,7 @@ function isRetryable(err: unknown): boolean {
  * this runs inside a BullMQ job that already has its own outer
  * lifecycle (see apps/worker/src/aiPipeline.ts).
  */
-export async function analyzeChangeWithRetry(provider: AiProvider, input: ChangeAnalysisInput): Promise<AiProviderResult> {
+export async function analyzeChangeWithRetry(provider: AiProvider, input: ChangeAnalysisInput): Promise<NormalizedAiResponse> {
   try {
     return await provider.analyzeChange(input);
   } catch (err) {

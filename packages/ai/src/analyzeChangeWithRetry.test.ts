@@ -20,7 +20,7 @@ describe("analyzeChangeWithRetry", () => {
   it("succeeds on the first attempt without retrying when nothing fails", async () => {
     const provider = createFakeAiProvider();
     const result = await analyzeChangeWithRetry(provider, input);
-    expect(result.output.summary).toBeTruthy();
+    expect(result.content).toBeTruthy();
     expect(provider.callCount).toBe(1);
   });
 
@@ -30,7 +30,7 @@ describe("analyzeChangeWithRetry", () => {
       throwError: () => new AiProviderRequestError("fake", "temporary 503", true),
     });
     const result = await analyzeChangeWithRetry(provider, input);
-    expect(result.output.summary).toBeTruthy();
+    expect(result.content).toBeTruthy();
     expect(provider.callCount).toBe(2);
   });
 
@@ -40,7 +40,7 @@ describe("analyzeChangeWithRetry", () => {
       throwError: () => new AiProviderTimeoutError("fake", 20_000),
     });
     const result = await analyzeChangeWithRetry(provider, input);
-    expect(result.output.summary).toBeTruthy();
+    expect(result.content).toBeTruthy();
     expect(provider.callCount).toBe(2);
   });
 

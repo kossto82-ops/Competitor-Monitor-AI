@@ -38,3 +38,36 @@ export const loginInputSchema = z.object({
   password: z.string().min(1).max(200),
 });
 export type LoginInput = z.infer<typeof loginInputSchema>;
+
+/**
+ * Phase 3.1: customer-selectable AI provider kinds. Deliberately
+ * duplicated here (not imported from @cma/ai's SELECTABLE_AI_PROVIDER_KINDS)
+ * to avoid a new cross-package dependency for two string literals -
+ * @cma/core has none today. "fake" is never selectable - it exists only
+ * for local development and automated tests.
+ */
+export const SELECTABLE_AI_CONNECTION_PROVIDERS = ["openai", "openai-compatible"] as const;
+
+export const createAiConnectionInputSchema = z
+  .object({
+    provider: z.enum(SELECTABLE_AI_CONNECTION_PROVIDERS),
+    model: z.string().min(1).max(200),
+    baseUrl: z.string().url().optional(),
+    apiKey: z.string().min(1).max(2000),
+    enabled: z.boolean().optional(),
+  })
+  .refine((value) => value.provider !== "openai-compatible" || !!value.baseUrl, {
+    message: "baseUrl is required when provider is 'openai-compatible'",
+    path: ["baseUrl"],
+  });
+export type CreateAiConnectionInput = z.infer<typeof createAiConnectionInputSchema>;
+
+/** apiKey is optional on update - omitting it leaves the stored credential unchanged. */
+export const updateAiConnectionInputSchema = z.object({
+  provider: z.enum(SELECTABLE_AI_CONNECTION_PROVIDERS).optional(),
+  model: z.string().min(1).max(200).optional(),
+  baseUrl: z.string().url().optional().nullable(),
+  apiKey: z.string().min(1).max(2000).optional(),
+  enabled: z.boolean().optional(),
+});
+export type UpdateAiConnectionInput = z.infer<typeof updateAiConnectionInputSchema>;

@@ -1,10 +1,9 @@
-import type { AiProvider, AiProviderResult, ChangeAnalysisInput } from "../types.js";
-import { parseAiOutput } from "../parseOutput.js";
+import type { AiProvider, ChangeAnalysisInput, NormalizedAiResponse } from "../types.js";
 
 /**
- * Deterministic test double for AiProvider (Section 14: "the fake
- * provider must be injected through the provider interface... do not
- * use a live paid model for the automated test suite"). Also usable
+ * Deterministic test double for AiProvider (Section 11/26: "the fake
+ * provider must be injected through the provider interface... automated
+ * test suites must NOT depend on paid external AI calls"). Also usable
  * from apps/worker in a real (non-mocked) process when
  * CMA_AI_PROVIDER=fake is set - e.g. for Playwright E2E runs, so the
  * full queue/worker/UI path is exercised without a real API key or
@@ -12,10 +11,11 @@ import { parseAiOutput } from "../parseOutput.js";
  * fixture server without touching the real internet.
  *
  * `respond` receives the exact bounded input the real provider would
- * receive and returns raw response text - it goes through the same
- * parseAiOutput() as a real provider, so a test asserting "malformed
- * JSON is rejected" or "schema-invalid output is rejected" exercises
- * the real validation path, not a shortcut around it.
+ * receive and returns raw response text - this text goes through the
+ * exact same parseAiOutput() validation a real provider's output would
+ * (via analyzeAndValidateChange.ts), never a shortcut around it, so a
+ * test asserting "malformed JSON is rejected" or "schema-invalid output
+ * is rejected" exercises the real validation path.
  */
 export interface FakeAiProviderOptions {
   respond?: (input: ChangeAnalysisInput) => string | Promise<string>;
@@ -61,22 +61,15 @@ export function createFakeAiProvider(options: FakeAiProviderOptions = {}): AiPro
     get callCount() {
       return callCount;
     },
-    async analyzeChange(input: ChangeAnalysisInput): Promise<AiProviderResult> {
+    async analyzeChange(input: ChangeAnalysisInput): Promise<NormalizedAiResponse> {
       callCount += 1;
 
       if (options.throwError && (options.failFirstNCalls === undefined || callCount <= options.failFirstNCalls)) {
         throw options.throwError();
       }
 
-      const rawText = options.respond ? await options.respond(input) : defaultCannedResponse(input);
-      const output = parseAiOutput("fake", rawText);
-
-      return {
-        output,
-        provider: "fake",
-        model: "fake-v1",
-        usage: { inputTokens: 100, outputTokens: 50, costUsd: 0 },
-      };
+      const content = options.respond ? await options.respond(input) : defaultCannedResponse(input);
+      return { content, inputTokens: 100, outputTokens: 50, totalTokens: 150, finishReason: "stop" };
     },
   };
 }

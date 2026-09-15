@@ -48,27 +48,46 @@ export interface AiAnalysisOutput {
   confidence: AiConfidenceLevel;
 }
 
-export interface AiProviderUsage {
+/**
+ * Phase 3.1 (Section 13): the provider-neutral response shape every
+ * `AiProvider` implementation must translate its vendor-specific
+ * response into. No vendor type (an OpenAI chat-completion object, an
+ * Anthropic message, etc.) is ever allowed to escape a provider
+ * adapter - this is the only shape the rest of the system (the
+ * pipeline, the parser, the repository) ever sees.
+ *
+ * `content` is the raw model output text, NOT yet parsed or validated -
+ * parsing/schema validation is a separate, centralized step
+ * (parseOutput.ts, invoked by analyzeAndValidateChange.ts) that runs
+ * identically regardless of which provider produced the text (Section
+ * 4: "never trust the model response merely because [the vendor API]
+ * returned HTTP 200").
+ *
+ * `providerMetadata` is optional, small, vendor-specific diagnostic
+ * data (e.g. an OpenAI response id) - it is bounded and MUST NEVER
+ * contain a credential, a full prompt, or full page content (Section
+ * 12/25).
+ */
+export interface NormalizedAiResponse {
+  content: string;
   inputTokens?: number;
   outputTokens?: number;
-  costUsd?: number;
-}
-
-export interface AiProviderResult {
-  output: AiAnalysisOutput;
-  provider: string;
-  model: string;
-  usage: AiProviderUsage;
+  totalTokens?: number;
+  finishReason?: string;
+  providerMetadata?: unknown;
 }
 
 /**
- * Section 6: the only contract the rest of the system depends on.
- * `analyzeChange` may throw AiProviderTimeoutError, AiProviderRequestError
- * or AiOutputValidationError (see errors.ts) - callers (aiPipeline.ts in
- * apps/worker) are responsible for turning those into a FAILED
- * AiAnalysis row, never for retrying indefinitely.
+ * Section 2/6: the only contract the rest of the system depends on -
+ * expressed as a business-level operation ("analyze this change"), not
+ * a vendor API call. `analyzeChange` may throw AiProviderTimeoutError,
+ * AiProviderRequestError, or AiProviderConfigError (see errors.ts) -
+ * callers (aiPipeline.ts in apps/worker) are responsible for turning
+ * those into a FAILED AiAnalysis row, never for retrying indefinitely.
+ * Malformed/schema-invalid output is NOT the provider's concern - see
+ * NormalizedAiResponse's doc comment above.
  */
 export interface AiProvider {
   readonly name: string;
-  analyzeChange(input: ChangeAnalysisInput): Promise<AiProviderResult>;
+  analyzeChange(input: ChangeAnalysisInput): Promise<NormalizedAiResponse>;
 }

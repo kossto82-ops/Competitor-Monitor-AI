@@ -112,10 +112,11 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users        User[]
-  competitors  Competitor[]
-  usageRecords UsageRecord[]
-  reports      Report[]
+  users         User[]
+  competitors   Competitor[]
+  usageRecords  UsageRecord[]
+  reports       Report[]
+  aiConnections AiConnection[]
 
   @@map("organizations")
 }
@@ -327,6 +328,14 @@ model AiAnalysis {
   costUsd      Float?
   durationMs   Int?
 
+  // Phase 3.1 (Section 12): small, generic, vendor-specific diagnostic
+  // data (e.g. an OpenAI response id) - deliberately NOT typed columns
+  // like `openaiResponseId`, so the core schema never grows a new
+  // column per provider. MUST NEVER contain a credential, a full
+  // prompt, or full page content - see NormalizedAiResponse's doc
+  // comment in packages/ai/src/types.ts, which is what populates this.
+  providerMetadata Json?
+
   errorMessage String?
 
   startedAt   DateTime?
@@ -336,6 +345,38 @@ model AiAnalysis {
 
   @@index([organizationId])
   @@map("ai_analyses")
+}
+
+// Phase 3.1 (Section 3/4): an organization's own AI provider
+// configuration - the SaaS multi-tenancy requirement that Phase 3's
+// single environment-variable-configured provider did not support.
+// `encryptedApiKey` is ciphertext (see @cma/security's
+// encryptCredential/decryptCredential) - this column must never be
+// selected into any API response or log line; repository functions in
+// packages/db/src/repositories/aiConnections.ts enforce that by
+// returning a "safe" DTO (no key material) from every function except
+// the one internal-only function the worker uses to build a provider.
+//
+// One organization may have multiple connections (e.g. while migrating
+// from one provider to another) but at most one ENABLED one is ever
+// used by the pipeline at a time - see
+// getEnabledAiConnectionConfigForOrg in the repository.
+model AiConnection {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  provider        String
+  model           String
+  baseUrl         String?
+  encryptedApiKey String
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([organizationId, enabled])
+  @@map("ai_connections")
 }
 
 model Report {

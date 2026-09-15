@@ -62,6 +62,8 @@ export interface CompleteAiAnalysisInput {
   outputTokens?: number;
   costUsd?: number;
   durationMs: number;
+  /** Section 12: small, generic, vendor-specific diagnostics only - never a credential or full prompt/content. */
+  providerMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -87,6 +89,7 @@ export async function markAiAnalysisCompleted(id: string, input: CompleteAiAnaly
       outputTokens: input.outputTokens ?? null,
       costUsd: input.costUsd ?? null,
       durationMs: input.durationMs,
+      providerMetadata: (input.providerMetadata as Prisma.InputJsonValue | undefined) ?? Prisma.JsonNull,
       completedAt: new Date(),
     },
   });

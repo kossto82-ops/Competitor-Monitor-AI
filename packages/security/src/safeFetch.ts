@@ -171,3 +171,117 @@ export function requestViaIp(
     req.end();
   });
 }
+
+export interface SafePostJsonOptions {
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+  maxBodyBytes?: number;
+  resolveFn?: ResolveFn;
+}
+
+/**
+ * Phase 3.1 (Section 20): a customer-supplied `baseUrl` (the
+ * OpenAI-compatible AI provider) is exactly as untrusted a destination
+ * as a monitored competitor URL - this is the same SSRF boundary as
+ * `safeGet`, just for a single JSON POST with custom headers instead of
+ * a GET. Deliberately does NOT follow redirects (unlike `safeGet`): a
+ * legitimate AI API endpoint has no reason to redirect a POST, and
+ * transparently following one would reopen exactly the DNS-rebinding/
+ * private-target gap `resolveAndValidateHost` exists to close. A 3xx
+ * response is surfaced to the caller as an error instead.
+ */
+export async function safePostJson(inputUrl: string, body: unknown, options: SafePostJsonOptions = {}): Promise<SafeFetchResult> {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, maxBodyBytes = DEFAULT_MAX_BODY_BYTES, headers = {}, resolveFn } = options;
+
+  const url = new URL(inputUrl);
+  assertProtocolAllowed(url);
+  const validatedIp = await resolveAndValidateHost(url.hostname, resolveFn);
+
+  const payload = JSON.stringify(body);
+  const response = await requestJsonViaIp(url, validatedIp, payload, { timeoutMs, maxBodyBytes, headers });
+
+  if (isRedirectStatus(response.status)) {
+    throw new SafeFetchError(`Refusing to follow a redirect from "${inputUrl}" (POST requests are not redirected).`);
+  }
+
+  return { ...response, finalUrl: url.toString() };
+}
+
+/**
+ * POST counterpart to `requestViaIp` - connects directly to
+ * `connectIp` (never re-resolving the hostname) with a JSON body and
+ * caller-supplied headers (e.g. `Authorization`). Exported for the same
+ * reason `requestViaIp` is: so tests can exercise HTTP mechanics
+ * against a local server without needing to defeat the SSRF allowlist.
+ * Production code must always go through `safePostJson`.
+ */
+export function requestJsonViaIp(
+  url: URL,
+  connectIp: string,
+  jsonBody: string,
+  opts: { timeoutMs: number; maxBodyBytes: number; headers: Record<string, string> },
+): Promise<Omit<SafeFetchResult, "finalUrl">> {
+  const isHttps = url.protocol === "https:";
+  const transport = isHttps ? https : http;
+  const bodyBuffer = Buffer.from(jsonBody, "utf-8");
+
+  return new Promise((resolve, reject) => {
+    const req = transport.request(
+      {
+        host: connectIp,
+        port: url.port ? Number(url.port) : isHttps ? 443 : 80,
+        path: `${url.pathname}${url.search}`,
+        method: "POST",
+        headers: {
+          Host: url.hostname,
+          "Content-Type": "application/json",
+          "Content-Length": bodyBuffer.byteLength,
+          ...opts.headers,
+        },
+        ...(isHttps ? { servername: url.hostname } : {}),
+        timeout: opts.timeoutMs,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let received = 0;
+        let aborted = false;
+
+        res.on("data", (chunk: Buffer) => {
+          received += chunk.length;
+          if (received > opts.maxBodyBytes) {
+            aborted = true;
+            res.destroy();
+            reject(new SafeFetchError(`Response for "${url.toString()}" exceeded ${opts.maxBodyBytes} bytes.`));
+            return;
+          }
+          chunks.push(chunk);
+        });
+
+        res.on("end", () => {
+          if (aborted) return;
+          resolve({
+            status: res.statusCode ?? 0,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString("utf-8"),
+          });
+        });
+
+        res.on("error", (err) => {
+          if (aborted) return;
+          reject(new SafeFetchError(`Response stream error for "${url.toString()}": ${err.message}`, err));
+        });
+      },
+    );
+
+    req.on("timeout", () => {
+      req.destroy(new SafeFetchError(`Request to "${url.toString()}" timed out after ${opts.timeoutMs}ms.`));
+    });
+
+    req.on("error", (err) => {
+      reject(new SafeFetchError(`Request to "${url.toString()}" failed: ${err.message}`, err));
+    });
+
+    req.write(bodyBuffer);
+    req.end();
+  });
+}

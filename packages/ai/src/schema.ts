@@ -23,3 +23,30 @@ export const aiAnalysisOutputSchema = z.object({
   speculation: z.array(z.string().trim().min(1).max(500)).max(10),
   confidence: z.enum(AI_CONFIDENCE_LEVELS),
 });
+
+/**
+ * Phase 3.1: plain JSON Schema mirror of aiAnalysisOutputSchema, for
+ * providers with native structured-output support (OpenAI's Responses
+ * API `text.format: { type: "json_schema" }`). Deliberately hand-kept
+ * in sync rather than derived from the zod schema - OpenAI's "strict"
+ * structured-output mode only supports a constrained JSON Schema
+ * subset (no minLength/maxLength), so a generic zod-to-JSON-Schema
+ * conversion would either fail strict mode or silently drop
+ * constraints. This is ONLY a request-shaping hint to the model; the
+ * zod schema above remains the actual enforcement point (Section 4:
+ * "never trust the model response merely because OpenAI returned
+ * HTTP 200") - every provider's output still goes through
+ * parseAiOutput()'s zod validation regardless of what schema was sent.
+ */
+export const aiAnalysisOutputJsonSchema = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    facts: { type: "array", items: { type: "string" } },
+    interpretations: { type: "array", items: { type: "string" } },
+    speculation: { type: "array", items: { type: "string" } },
+    confidence: { type: "string", enum: [...AI_CONFIDENCE_LEVELS] },
+  },
+  required: ["summary", "facts", "interpretations", "speculation", "confidence"],
+  additionalProperties: false,
+} as const;

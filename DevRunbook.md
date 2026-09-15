@@ -148,30 +148,66 @@ CMA_ALLOW_PRIVATE_TARGETS=true
 Both must be set — the override is a no-op whenever `NODE_ENV=production`, regardless of the flag.
 Never set `CMA_ALLOW_PRIVATE_TARGETS` in a real deployment.
 
-## 7b. AI analysis (Phase 3)
+## 7b. AI analysis (Phase 3 / 3.1 - provider-neutral, multi-tenant)
 
 `apps/worker` also runs a second BullMQ worker for AI analysis jobs (queue `ai-analysis-jobs`).
-It needs an AI provider — real or fake:
+It calls whichever `AiProvider` `apps/worker/src/resolveAiProvider.ts` resolves for the
+**ChangeEvent's own organization** - never a single global provider. Precedence, strict, never
+silently crossed:
+
+1. **The organization's own enabled `AiConnection`** (`packages/db/src/repositories/aiConnections.ts`)
+   - the real, multi-tenant, SaaS path. Each organization configures its own provider/model/
+   credential via `/settings/ai` in the app (`POST /api/ai-connections`).
+2. **Local dev/test env fallback** (`CMA_AI_PROVIDER=fake` or `=openai` + `OPENAI_API_KEY`) - only
+   when `NODE_ENV !== "production"` **and** the organization has no `AiConnection` of its own.
+3. Otherwise, the analysis fails cleanly (`AiAnalysis.status = FAILED`, the underlying
+   `ChangeEvent` is never touched) - never a silent fallback to a different provider than the one
+   (if any) the organization configured.
 
 ```bash
-# Real provider (costs money, calls the actual Anthropic API):
-ANTHROPIC_API_KEY="sk-ant-..."
-# Optional: CMA_AI_MODEL="claude-haiku-4-5-20251001" (default shown)
+# Any organization creating a connection needs this set wherever a connection is
+# created/decrypted - both apps/web (encrypts on save) and apps/worker (decrypts to call
+# the provider):
+CMA_AI_ENCRYPTION_KEY="<any long random string - generate with: openssl rand -hex 32>"
+
+# Local dev/test env fallback, used only when an organization has no AiConnection:
+# Real provider (costs money, calls the actual OpenAI API):
+OPENAI_API_KEY="sk-..."
+CMA_AI_PROVIDER=openai          # default; explicit for clarity
+# Optional: CMA_AI_MODEL="gpt-5.6-luna" (default shown - configurable, never hard-coded)
 
 # Fake provider (local dev / E2E / CI — deterministic, free, no network call):
 NODE_ENV=development
 CMA_AI_PROVIDER=fake
 ```
 
-Same convention as `CMA_ALLOW_PRIVATE_TARGETS`: `CMA_AI_PROVIDER=fake` is a no-op whenever
-`NODE_ENV=production`, so a misconfigured production deployment fails loudly (missing
-`ANTHROPIC_API_KEY` throws the moment a job needs it) instead of silently faking analysis output.
-**`apps/web/e2e/ai-analysis.spec.ts` requires `apps/worker` to be running with
-`CMA_AI_PROVIDER=fake`** — start it with:
+Same convention as `CMA_ALLOW_PRIVATE_TARGETS`: both the fake and the env-based OpenAI fallback
+are no-ops whenever `NODE_ENV=production`, so a misconfigured production deployment fails loudly
+(no `AiConnection` + no env fallback = `NoAiProviderConfiguredError`) instead of silently faking
+analysis output or reaching for a shared credential. `OPENAI_API_KEY` and `CMA_AI_ENCRYPTION_KEY`
+are read only in `apps/worker`/`apps/web` server code — never in the browser, never in a BullMQ
+job payload, a database row, or a log line (see `SecurityGuidelines.md` and Phase 3.1's own
+validation doc).
+
+**`apps/web/e2e/ai-analysis.spec.ts` and `ai-connections.spec.ts` require `apps/worker` to be
+running with `CMA_AI_PROVIDER=fake`** (both use fresh orgs with no `AiConnection`, so the dev
+fallback is what actually runs) — start it with:
 
 ```bash
 CMA_AI_PROVIDER=fake npm run --workspace apps/worker dev
 ```
+
+**`apps/web/e2e/ai-openai-smoke.spec.ts`** is the dedicated *real* OpenAI end-to-end smoke test
+(Phase 3.1). It is skipped automatically unless `OPENAI_API_KEY` is set for the Playwright
+process — run it with `apps/worker` started using the *real* provider (no `CMA_AI_PROVIDER=fake`):
+
+```bash
+OPENAI_API_KEY="sk-..." npm run --workspace apps/worker dev
+OPENAI_API_KEY="sk-..." npx playwright test e2e/ai-openai-smoke.spec.ts --workspace apps/web
+```
+
+This test makes real, billed OpenAI API calls (via the dev-fallback path, since the fresh test
+organizations it creates have no `AiConnection` of their own). Do not run it in ordinary CI.
 
 ## 8. Git workflow
 
