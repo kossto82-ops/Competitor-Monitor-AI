@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
-import { getChangeEventForOrg } from "@cma/db";
+import { getChangeEventForOrg, getAiAnalysisForChangeEvent } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { changeTypeDisplay, severityDisplay, verificationStateDisplay } from "@/lib/statusDisplay";
 import { formatDateTime } from "@/lib/formatTime";
+import { AiAnalysisPanel } from "@/components/app/AiAnalysisPanel";
 
 interface PageProps {
   params: Promise<{ changeEventId: string }>;
@@ -76,6 +77,8 @@ export default async function ChangeDetailPage({ params }: PageProps) {
 
   const changeEvent = await getChangeEventForOrg(session.organizationId, changeEventId);
   if (!changeEvent) notFound();
+
+  const aiAnalysis = await getAiAnalysisForChangeEvent(session.organizationId, changeEventId);
 
   const type = changeTypeDisplay(changeEvent.changeType);
   const severity = severityDisplay(changeEvent.severity);
@@ -155,6 +158,12 @@ export default async function ChangeDetailPage({ params }: PageProps) {
           <SnapshotCard title="Current snapshot" snapshot={changeEvent.currentSnapshot} />
         </div>
       </div>
+
+      <AiAnalysisPanel
+        changeEventId={changeEvent.id}
+        changeType={changeEvent.changeType}
+        initialAnalysis={aiAnalysis}
+      />
     </div>
   );
 }

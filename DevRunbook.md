@@ -148,6 +148,31 @@ CMA_ALLOW_PRIVATE_TARGETS=true
 Both must be set — the override is a no-op whenever `NODE_ENV=production`, regardless of the flag.
 Never set `CMA_ALLOW_PRIVATE_TARGETS` in a real deployment.
 
+## 7b. AI analysis (Phase 3)
+
+`apps/worker` also runs a second BullMQ worker for AI analysis jobs (queue `ai-analysis-jobs`).
+It needs an AI provider — real or fake:
+
+```bash
+# Real provider (costs money, calls the actual Anthropic API):
+ANTHROPIC_API_KEY="sk-ant-..."
+# Optional: CMA_AI_MODEL="claude-haiku-4-5-20251001" (default shown)
+
+# Fake provider (local dev / E2E / CI — deterministic, free, no network call):
+NODE_ENV=development
+CMA_AI_PROVIDER=fake
+```
+
+Same convention as `CMA_ALLOW_PRIVATE_TARGETS`: `CMA_AI_PROVIDER=fake` is a no-op whenever
+`NODE_ENV=production`, so a misconfigured production deployment fails loudly (missing
+`ANTHROPIC_API_KEY` throws the moment a job needs it) instead of silently faking analysis output.
+**`apps/web/e2e/ai-analysis.spec.ts` requires `apps/worker` to be running with
+`CMA_AI_PROVIDER=fake`** — start it with:
+
+```bash
+CMA_AI_PROVIDER=fake npm run --workspace apps/worker dev
+```
+
 ## 8. Git workflow
 
 - Branch from `main`, name branches descriptively (e.g. `feature/dashboard-competitors-list`).

@@ -6,3 +6,10 @@ export {
   monitoringJobId,
   type MonitoringJobPayload,
 } from "./monitoringQueue.js";
+
+export {
+  AI_ANALYSIS_QUEUE_NAME,
+  createAiAnalysisQueue,
+  createAiAnalysisWorker,
+  type AiAnalysisJobPayload,
+} from "./aiAnalysisQueue.js";

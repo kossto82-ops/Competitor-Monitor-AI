@@ -1,7 +1,8 @@
-import { createMonitoringWorker, type MonitoringJobPayload } from "@cma/queue";
-import { getMonitoringJobForOrg, markMonitoringJobFailed } from "@cma/db";
+import { createMonitoringWorker, createAiAnalysisWorker, type MonitoringJobPayload, type AiAnalysisJobPayload } from "@cma/queue";
+import { getMonitoringJobForOrg, markMonitoringJobFailed, getAiAnalysisForOrg, markAiAnalysisFailed } from "@cma/db";
 import type { Job } from "bullmq";
 import { runMonitoringJob } from "./pipeline.js";
+import { runAiAnalysisJob } from "./aiPipeline.js";
 
 const worker = createMonitoringWorker(async (job: Job<MonitoringJobPayload>) => {
   const result = await runMonitoringJob(job.data);
@@ -45,9 +46,42 @@ worker.on("failed", (job, err) => {
     });
 });
 
+const aiWorker = createAiAnalysisWorker(async (job: Job<AiAnalysisJobPayload>) => {
+  const result = await runAiAnalysisJob(job.data);
+  console.log(`[ai-worker] job=${job.id} changeEventId=${job.data.changeEventId} status=${result.status}`);
+  return result;
+});
+
+/**
+ * Same defense-in-depth as the monitoring worker's 'failed' handler
+ * above: a worker crash mid-job or a BullMQ stalled-job timeout can
+ * reach here without runAiAnalysisJob's own try/catch ever running,
+ * which would otherwise leave the AiAnalysis row stuck RUNNING
+ * forever (Section 9's "do not leave analyses indefinitely stuck").
+ */
+aiWorker.on("failed", (job, err) => {
+  console.error(`[ai-worker] job=${job?.id} FAILED:`, err.message);
+
+  const aiAnalysisId = job?.data?.aiAnalysisId;
+  const organizationId = job?.data?.organizationId;
+  if (!aiAnalysisId || !organizationId) return;
+
+  getAiAnalysisForOrg(organizationId, aiAnalysisId)
+    .then((current) => {
+      if (current.status !== "COMPLETED" && current.status !== "FAILED") {
+        return markAiAnalysisFailed(aiAnalysisId, err.message);
+      }
+      return undefined;
+    })
+    .catch((markErr: unknown) => {
+      console.error(`[ai-worker] failed to mark AiAnalysis ${aiAnalysisId} as FAILED after job failure:`, markErr);
+    });
+});
+
 console.log("[worker] listening for monitoring jobs...");
+console.log("[ai-worker] listening for AI analysis jobs...");
 
 process.on("SIGTERM", async () => {
-  await worker.close();
+  await Promise.all([worker.close(), aiWorker.close()]);
   process.exit(0);
 });

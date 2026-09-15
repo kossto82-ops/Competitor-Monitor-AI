@@ -12,6 +12,7 @@
     "enqueue": "tsx src/enqueueAll.ts"
   },
   "dependencies": {
+    "@cma/ai": "*",
     "@cma/core": "*",
     "@cma/db": "*",
     "@cma/detection": "*",

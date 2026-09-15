@@ -87,7 +87,13 @@ describe.skipIf(!reachable)("tenant isolation", () => {
       },
     });
     const aiAnalysis = await prisma.aiAnalysis.create({
-      data: { changeEventId: changeEvent.id, status: "SUCCESS", summary: "test summary" },
+      data: {
+        organizationId: tenant.organization.id,
+        changeEventId: changeEvent.id,
+        promptVersion: "test-fixture-v1",
+        status: "COMPLETED",
+        summary: "test summary",
+      },
     });
     const report = await prisma.report.create({
       data: {

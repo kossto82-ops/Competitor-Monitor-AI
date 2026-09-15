@@ -81,14 +81,15 @@ enum EntityType {
   GENERIC
 }
 
-// Not written to yet in Phase 1 - the AiAnalysis table exists so the
-// ChangeEvent -> AiAnalysis relation doesn't require a migration later
-// that touches already-populated ChangeEvent rows.
+// Phase 3: mirrors JobStatus's PENDING -> RUNNING -> COMPLETED/FAILED
+// shape deliberately - an AI analysis job is a job with the same
+// lifecycle concerns (must reach a terminal state, must be resumable
+// after a worker crash), it just calls a different backend.
 enum AiAnalysisStatus {
-  SUCCESS
+  PENDING
+  RUNNING
+  COMPLETED
   FAILED
-  TIMEOUT
-  SKIPPED
 }
 
 enum NotificationChannel {
@@ -120,15 +121,15 @@ model Organization {
 }
 
 model User {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  email          String   @unique
+  email          String       @unique
   passwordHash   String
   name           String?
-  role           UserRole @default(OWNER)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  role           UserRole     @default(OWNER)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([organizationId])
   @@map("users")
@@ -139,15 +140,15 @@ model User {
 // ---------------------------------------------------------------------------
 
 model Competitor {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
   website        String?
   notes          String?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   monitoredUrls MonitoredUrl[]
 
@@ -156,7 +157,7 @@ model Competitor {
 }
 
 model MonitoredUrl {
-  id             String @id @default(cuid())
+  id             String     @id @default(cuid())
   organizationId String
   competitorId   String
   competitor     Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
@@ -189,7 +190,7 @@ model MonitoredUrl {
 // ---------------------------------------------------------------------------
 
 model MonitoringJob {
-  id             String @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   monitoredUrlId String
   monitoredUrl   MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
@@ -210,14 +211,14 @@ model MonitoringJob {
 }
 
 model Snapshot {
-  id              String @id @default(cuid())
+  id              String        @id @default(cuid())
   organizationId  String
   monitoredUrlId  String
-  monitoredUrl    MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
-  monitoringJobId String       @unique
+  monitoredUrl    MonitoredUrl  @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+  monitoringJobId String        @unique
   monitoringJob   MonitoringJob @relation(fields: [monitoringJobId], references: [id], onDelete: Cascade)
 
-  fetchedAt         DateTime @default(now())
+  fetchedAt         DateTime          @default(now())
   extractionMethod  ExtractionMethod
   httpStatus        Int?
   finalUrl          String?
@@ -228,7 +229,7 @@ model Snapshot {
   contentHash        String?
   structuredDataHash String?
   confidence         Float
-  warnings           Json     @default("[]")
+  warnings           Json    @default("[]")
 
   extractedEntities      ExtractedEntity[]
   changeEventsAsCurrent  ChangeEvent[]     @relation("CurrentSnapshot")
@@ -257,7 +258,7 @@ model ExtractedEntity {
 }
 
 model ChangeEvent {
-  id             String @id @default(cuid())
+  id             String       @id @default(cuid())
   organizationId String
   monitoredUrlId String
   monitoredUrl   MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
@@ -277,7 +278,7 @@ model ChangeEvent {
   currency         String?
   percentageChange Float?
   evidenceExcerpt  String
-  detectedAt       DateTime @default(now())
+  detectedAt       DateTime   @default(now())
 
   aiAnalysis AiAnalysis?
 
@@ -291,25 +292,49 @@ model ChangeEvent {
 // write to them (no AI calls, no reports, no notifications sent yet).
 // ---------------------------------------------------------------------------
 
+// Phase 3: one AI interpretation per ChangeEvent (the `@unique` below
+// is the idempotency guarantee - a duplicate BullMQ delivery or worker
+// retry can never create a second row, see aiPipeline.ts's
+// runAiAnalysisJob for the accompanying "skip if already COMPLETED"
+// check that also avoids a duplicate *paid provider call*, which the
+// unique constraint alone would not prevent).
+//
+// `organizationId` is denormalized here like every other tenant table
+// (see schema header) even though it is reachable via changeEvent -
+// every read MUST filter on it directly, never rely on the join.
 model AiAnalysis {
-  id            String @id @default(cuid())
-  changeEventId String @unique
-  changeEvent   ChangeEvent @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
+  id             String      @id @default(cuid())
+  organizationId String
+  changeEventId  String      @unique
+  changeEvent    ChangeEvent @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
 
-  status                    AiAnalysisStatus
-  summary                   String?
-  category                  String?
-  businessImpact            String?
-  competitiveInterpretation String?
-  speculation               String?
-  facts                     Json             @default("[]")
-  recommendedAttention      Boolean          @default(false)
-  providerModel             String?
-  promptTokens              Int?
-  completionTokens          Int?
-  costUsd                   Float?
-  createdAt                 DateTime         @default(now())
+  status        AiAnalysisStatus @default(PENDING)
+  promptVersion String
+  provider      String?
+  model         String?
 
+  // The structured output contract (Section 5 of the brief). Stored as
+  // Json arrays rather than a normalized table - this is a single
+  // small, append-only-per-row blob, not a queryable collection.
+  summary         String?
+  facts           Json    @default("[]")
+  interpretations Json    @default("[]")
+  speculation     Json    @default("[]")
+  confidence      String?
+
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Float?
+  durationMs   Int?
+
+  errorMessage String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([organizationId])
   @@map("ai_analyses")
 }
 

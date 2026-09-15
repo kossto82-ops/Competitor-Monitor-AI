@@ -11,6 +11,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@cma/ai": "*",
     "@cma/core": "*",
     "@cma/db": "*",
     "@cma/queue": "*",

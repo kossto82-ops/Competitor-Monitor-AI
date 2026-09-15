@@ -12,14 +12,15 @@ export async function getReportForOrg(organizationId: string, reportId: string) 
 }
 
 /**
- * AiAnalysis has no organizationId column of its own (it hangs off
- * ChangeEvent, which does) - tenant scoping here goes through that
- * relation rather than a direct column, unlike every other repository
- * function in this package.
+ * Looks up an AiAnalysis by its own id. Phase 3 added a direct
+ * `organizationId` column to AiAnalysis (see the schema comment on
+ * that model) so this scopes the same way every other repository
+ * function does - a single `WHERE organizationId = ?`, not a join
+ * through ChangeEvent.
  */
 export async function getAiAnalysisForOrg(organizationId: string, aiAnalysisId: string) {
   const analysis = await prisma.aiAnalysis.findFirst({
-    where: { id: aiAnalysisId, changeEvent: { organizationId } },
+    where: { id: aiAnalysisId, organizationId },
   });
   if (!analysis) throw new NotFoundError("AiAnalysis");
   return analysis;

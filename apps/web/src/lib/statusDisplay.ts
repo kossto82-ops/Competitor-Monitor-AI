@@ -24,6 +24,34 @@ export function verificationStateDisplay(state: string): { label: string; tone: 
   }
 }
 
+export function aiAnalysisStatusDisplay(status: string): { label: string; tone: BadgeTone } {
+  switch (status) {
+    case "PENDING":
+      return { label: "Queued", tone: "blue" };
+    case "RUNNING":
+      return { label: "Analysing…", tone: "blue" };
+    case "COMPLETED":
+      return { label: "Analysis ready", tone: "green" };
+    case "FAILED":
+      return { label: "Analysis unavailable", tone: "red" };
+    default:
+      return { label: status, tone: "gray" };
+  }
+}
+
+export function aiConfidenceDisplay(confidence: string): { label: string; tone: BadgeTone } {
+  switch (confidence) {
+    case "high":
+      return { label: "High confidence", tone: "green" };
+    case "medium":
+      return { label: "Medium confidence", tone: "amber" };
+    case "low":
+      return { label: "Low confidence", tone: "gray" };
+    default:
+      return { label: confidence, tone: "gray" };
+  }
+}
+
 export function jobStatusDisplay(status: string): { label: string; tone: BadgeTone } {
   switch (status) {
     case "PENDING":
