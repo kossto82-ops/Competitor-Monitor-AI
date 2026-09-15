@@ -31,6 +31,7 @@ function makeDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
     getLatestVerifiedSnapshot: vi.fn().mockResolvedValue(null),
     createRunningMonitoringJob: vi.fn().mockResolvedValue({ id: "job-1" }),
     markMonitoringJobRunning: vi.fn().mockResolvedValue({ id: "pending-job-1" }),
+    markMonitoringJobFailed: vi.fn().mockResolvedValue(undefined),
     persistMonitoringResult: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -139,5 +140,66 @@ describe("runMonitoringJob", () => {
 
     await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
     expect(deps.persistMonitoringResult).toHaveBeenCalledTimes(1);
+  });
+
+  describe("unexpected pipeline exceptions (Phase 2.1 data-integrity hardening)", () => {
+    it("marks the job FAILED and rethrows when the extractor itself throws, instead of leaving it stuck RUNNING", async () => {
+      const boom = new Error("extractor crashed unexpectedly");
+      const deps = makeDeps({
+        extractor: { extract: vi.fn().mockRejectedValue(boom) },
+      });
+
+      await expect(
+        runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1", monitoringJobId: "pending-job-1" }, deps),
+      ).rejects.toThrow(boom);
+
+      expect(deps.markMonitoringJobFailed).toHaveBeenCalledWith("pending-job-1", boom.message);
+      // A genuine execution failure never calls persistMonitoringResult -
+      // there is no ExtractionResult/ComparisonResult to write, and doing
+      // so would fabricate a Snapshot for an attempt that never actually
+      // fetched anything.
+      expect(deps.persistMonitoringResult).not.toHaveBeenCalled();
+    });
+
+    it("marks the job FAILED and rethrows when persistMonitoringResult itself throws (e.g. a DB error mid-transaction)", async () => {
+      const dbError = new Error("connection terminated unexpectedly");
+      const deps = makeDeps({
+        persistMonitoringResult: vi.fn().mockRejectedValue(dbError),
+      });
+
+      await expect(runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps)).rejects.toThrow(
+        dbError,
+      );
+
+      expect(deps.markMonitoringJobFailed).toHaveBeenCalledWith("job-1", dbError.message);
+    });
+
+    it("does not let a failure in markMonitoringJobFailed itself swallow or replace the original error", async () => {
+      const boom = new Error("extractor crashed unexpectedly");
+      const deps = makeDeps({
+        extractor: { extract: vi.fn().mockRejectedValue(boom) },
+        markMonitoringJobFailed: vi.fn().mockRejectedValue(new Error("Postgres is also down")),
+      });
+
+      await expect(runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps)).rejects.toThrow(
+        boom,
+      );
+    });
+
+    it("never marks a job FAILED for a normal fetch/verification failure - FAILED_TO_VERIFY stays a COMPLETED-job outcome", async () => {
+      const deps = makeDeps({
+        extractor: {
+          extract: vi.fn().mockResolvedValue(
+            extractionResult({ httpStatus: 403, errorMessage: "Unexpected HTTP status 403", normalizedContent: "" }),
+          ),
+        },
+      });
+
+      const result = await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+
+      expect(result.verificationState).toBe("FAILED_TO_VERIFY");
+      expect(deps.markMonitoringJobFailed).not.toHaveBeenCalled();
+      expect(deps.persistMonitoringResult).toHaveBeenCalledTimes(1);
+    });
   });
 });

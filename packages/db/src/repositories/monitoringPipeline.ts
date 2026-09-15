@@ -29,6 +29,29 @@ export async function markMonitoringJobRunning(jobId: string) {
   });
 }
 
+/**
+ * Phase 2.1 addition: the terminal state for a job that never reached
+ * `persistMonitoringResult` at all - either the enqueue itself failed
+ * (see the scan route, which pre-creates a PENDING row before calling
+ * queue.add()) or the worker threw an exception it did not itself turn
+ * into an ExtractionResult (a genuine bug, a DB outage mid-pipeline,
+ * etc). This is deliberately distinct from `persistMonitoringResult`
+ * setting status "FAILED": that path means the job RAN and recorded a
+ * FAILED_TO_VERIFY snapshot (a fetch/verification failure, which is
+ * still a successful job execution); this path means the job's
+ * execution itself never completed, so there is no Snapshot to point
+ * to. Both surface as MonitoringJob.status === "FAILED" to any caller
+ * only interested in "is this job in a terminal, non-retryable-by-the-
+ * dashboard state", but callers that need to tell them apart can check
+ * whether a Snapshot row exists for the job.
+ */
+export async function markMonitoringJobFailed(jobId: string, errorMessage: string) {
+  return prisma.monitoringJob.update({
+    where: { id: jobId },
+    data: { status: "FAILED", finishedAt: new Date(), errorMessage },
+  });
+}
+
 export async function getMonitoringJobForOrg(organizationId: string, jobId: string) {
   return prisma.monitoringJob.findFirst({
     where: { id: jobId, organizationId },

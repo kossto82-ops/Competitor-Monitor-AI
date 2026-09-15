@@ -1,5 +1,5 @@
 export * from "../generated/client/index.js";
-export { prisma } from "./client.js";
+export { prisma, countPrismaQueries } from "./client.js";
 
 export * from "./repositories/errors.js";
 export * from "./repositories/organizations.js";

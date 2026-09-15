@@ -57,6 +57,7 @@ export interface PipelineDeps {
   getLatestVerifiedSnapshot: (monitoredUrlId: string) => Promise<PriorSnapshotLike | null>;
   createRunningMonitoringJob: (organizationId: string, monitoredUrlId: string) => Promise<{ id: string }>;
   markMonitoringJobRunning: (jobId: string) => Promise<{ id: string }>;
+  markMonitoringJobFailed: (jobId: string, errorMessage: string) => Promise<unknown>;
   persistMonitoringResult: (
     jobId: string,
     input: {
@@ -77,6 +78,7 @@ export function createDefaultPipelineDeps(): PipelineDeps {
     getLatestVerifiedSnapshot: db.getLatestVerifiedSnapshot,
     createRunningMonitoringJob: db.createRunningMonitoringJob,
     markMonitoringJobRunning: db.markMonitoringJobRunning,
+    markMonitoringJobFailed: db.markMonitoringJobFailed,
     persistMonitoringResult: db.persistMonitoringResult,
   };
 }
@@ -103,40 +105,68 @@ export async function runMonitoringJob(
     ? await deps.markMonitoringJobRunning(payload.monitoringJobId)
     : await deps.createRunningMonitoringJob(monitoredUrl.organizationId, monitoredUrl.id);
 
-  const priorSnapshot = await deps.getLatestVerifiedSnapshot(monitoredUrl.id);
-  const prior: PriorSnapshotData | null = priorSnapshot
-    ? {
-        contentHash: priorSnapshot.contentHash,
-        structuredDataHash: priorSnapshot.structuredDataHash,
-        normalizedContent: priorSnapshot.normalizedContent,
-        entities: toCoreEntities(priorSnapshot.extractedEntities),
-      }
-    : null;
+  /**
+   * Phase 2.1 addition: once the job row is RUNNING, everything below
+   * must end in a terminal state - COMPLETED or FAILED - or the row
+   * (and the dashboard's poller watching it) is stuck forever.
+   *
+   * This is deliberately NOT how a fetch/verification failure is
+   * handled: the extractor never throws for an HTTP error, a 403, a
+   * timeout, or malformed content - it always resolves with an
+   * ExtractionResult whose `errorMessage` field carries that failure,
+   * and `persistMonitoringResult` turns that into a COMPLETED job with
+   * a FAILED_TO_VERIFY snapshot attached (a successful job execution
+   * that could not establish reliable page state). Reaching this catch
+   * means the job's own execution broke unexpectedly - an extractor bug,
+   * a Postgres error mid-transaction, an out-of-memory error, etc - so
+   * there is no Snapshot for this attempt. Marking the job FAILED here
+   * (rather than leaving it RUNNING) and rethrowing keeps that
+   * distinction intact while still letting BullMQ's own retry/backoff
+   * and 'failed' event see the real error.
+   */
+  try {
+    const priorSnapshot = await deps.getLatestVerifiedSnapshot(monitoredUrl.id);
+    const prior: PriorSnapshotData | null = priorSnapshot
+      ? {
+          contentHash: priorSnapshot.contentHash,
+          structuredDataHash: priorSnapshot.structuredDataHash,
+          normalizedContent: priorSnapshot.normalizedContent,
+          entities: toCoreEntities(priorSnapshot.extractedEntities),
+        }
+      : null;
 
-  const extraction = await deps.extractor.extract({ url: monitoredUrl.url });
+    const extraction = await deps.extractor.extract({ url: monitoredUrl.url });
 
-  const comparison = compareSnapshots(prior, {
-    httpStatus: extraction.httpStatus,
-    errorMessage: extraction.errorMessage,
-    contentHash: extraction.contentHash,
-    structuredDataHash: extraction.structuredDataHash,
-    normalizedContent: extraction.normalizedContent,
-    entities: extraction.extractedEntities,
-  });
+    const comparison = compareSnapshots(prior, {
+      httpStatus: extraction.httpStatus,
+      errorMessage: extraction.errorMessage,
+      contentHash: extraction.contentHash,
+      structuredDataHash: extraction.structuredDataHash,
+      normalizedContent: extraction.normalizedContent,
+      entities: extraction.extractedEntities,
+    });
 
-  await deps.persistMonitoringResult(job.id, {
-    organizationId: monitoredUrl.organizationId,
-    monitoredUrlId: monitoredUrl.id,
-    previousSnapshotId: priorSnapshot?.id ?? null,
-    extraction,
-    comparison,
-    // Phase 1 never escalates to a browser or calls the AI layer.
-    usage: { browserEscalated: false, aiCallMade: false },
-  });
+    await deps.persistMonitoringResult(job.id, {
+      organizationId: monitoredUrl.organizationId,
+      monitoredUrlId: monitoredUrl.id,
+      previousSnapshotId: priorSnapshot?.id ?? null,
+      extraction,
+      comparison,
+      // Phase 1 never escalates to a browser or calls the AI layer.
+      usage: { browserEscalated: false, aiCallMade: false },
+    });
 
-  return {
-    monitoringJobId: job.id,
-    verificationState: comparison.verificationState,
-    changeEventCount: comparison.changeEvents.length,
-  };
+    return {
+      monitoringJobId: job.id,
+      verificationState: comparison.verificationState,
+      changeEventCount: comparison.changeEvents.length,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Best-effort: if even this update fails (e.g. Postgres just went
+    // down), the original error is still what's thrown below and is
+    // what BullMQ's retry/backoff and 'failed' event act on.
+    await deps.markMonitoringJobFailed(job.id, message).catch(() => undefined);
+    throw err;
+  }
 }
