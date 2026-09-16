@@ -21,3 +21,10 @@ export {
   dailyReportJobId,
   type DailyReportJobPayload,
 } from "./dailyReportQueue.js";
+
+export {
+  DIGEST_INTERPRETATION_QUEUE_NAME,
+  createDigestInterpretationQueue,
+  createDigestInterpretationWorker,
+  type DigestInterpretationJobPayload,
+} from "./digestInterpretationQueue.js";

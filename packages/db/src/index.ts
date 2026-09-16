@@ -12,6 +12,7 @@ export * from "./repositories/usage.js";
 export * from "./repositories/dailyReports.js";
 export * from "./repositories/dashboard.js";
 export * from "./repositories/aiAnalysis.js";
+export * from "./repositories/digestAiInterpretation.js";
 export * from "./repositories/aiConnections.js";
 export * from "./repositories/intelligence.js";
 export * from "./repositories/patterns.js";

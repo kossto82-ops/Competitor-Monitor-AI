@@ -27,3 +27,15 @@ export * from "./testConnection.js";
 export * from "./providers/fakeProvider.js";
 export * from "./providers/openaiProvider.js";
 export * from "./providers/openaiCompatibleProvider.js";
+
+// Phase 11 (Tier 4 - Evidence-Grounded AI Interpretation): the Digest
+// interpretation path, parallel to the ChangeEvent path above. See
+// digestTypes.ts's module doc comment for the architecture rationale.
+export * from "./digestTypes.js";
+export * from "./digestLimits.js";
+export * from "./digestSchema.js";
+export * from "./buildDigestContext.js";
+export * from "./digestPrompt.js";
+export * from "./validateDigestInterpretation.js";
+export * from "./interpretDigestWithRetry.js";
+export * from "./analyzeAndValidateDigest.js";

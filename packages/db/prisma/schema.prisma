@@ -154,6 +154,7 @@ model Organization {
   usageRecords  UsageRecord[]
   reports       Report[]
   aiConnections AiConnection[]
+  digestAiInterpretations DigestAiInterpretation[]
 
   @@map("organizations")
 }
@@ -415,6 +416,83 @@ model AiConnection {
   @@index([organizationId])
   @@index([organizationId, enabled])
   @@map("ai_connections")
+}
+
+// Phase 11 (Tier 4 - Evidence-Grounded AI Interpretation): ONE cache
+// slot per (organizationId, days) - deliberately NOT modeled like
+// AiAnalysis (`changeEventId @unique`), because a Digest interpretation
+// target is not immutable the way one ChangeEvent is: the Digest's
+// [now-days, now) window advances continuously, so "the interpretation
+// for this organization's 30-day digest" is inherently a moving target,
+// not a fixed fact that is analyzed exactly once and never again. See
+// PHASE11-VALIDATION-REPORT.md Section 9 ("Persistence") for the full
+// reasoning on why AiAnalysis was NOT reused here.
+//
+// `getOrCreateDigestAiInterpretationSlot` (packages/db/src/repositories/
+// digestAiInterpretation.ts) creates this row PENDING on first request
+// for a given (organizationId, days) pair, and explicitly resets an
+// already-COMPLETED/FAILED row back to PENDING on a fresh user-triggered
+// request (the Digest UI's "Interpret"/"Refresh" action) - unlike
+// AiAnalysis, a COMPLETED row here is expected to eventually go stale as
+// new ChangeEvents accumulate, and re-interpretation is a normal,
+// explicitly user-triggered action, never automatic/silent (Section 18
+// of the brief: "at most 1 provider call per digest interpretation act").
+//
+// This table NEVER stores deterministic data (ChangeEvent, ActivityPattern,
+// RepeatedPriceChangePattern, competitive context all remain exactly as
+// Phase 6/7/8/10 computed them) - only the AI's own OWN structured
+// interpretation of that already-verified evidence (Section 23 of the
+// brief).
+model DigestAiInterpretation {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  /// Which period selector (7/30/90) this interpretation slot belongs to - see apps/web's VALID_PERIOD_DAYS on /digest.
+  days Int
+
+  status        AiAnalysisStatus @default(PENDING)
+  promptVersion String
+  provider      String?
+  model         String?
+
+  // The exact [windowStart, windowEnd) the Digest actually used when this
+  // interpretation completed - recorded at COMPLETED time (not at PENDING
+  // creation time, since the worker recomputes a fresh window when the
+  // job actually runs), so the UI can show "generated for the period
+  // ending <windowEnd>" and let a customer judge staleness for
+  // themselves. Null while PENDING/RUNNING/FAILED-before-a-window-was-
+  // resolved.
+  windowStart DateTime?
+  windowEnd   DateTime?
+
+  // The structured output contract (Phase 11 Section 13/14) - Json
+  // arrays rather than a normalized table, same rationale as AiAnalysis's
+  // facts/interpretations/speculation columns: a single small,
+  // overwritten-on-regenerate blob, not a queryable collection.
+  summary         String?
+  observations    Json @default("[]")
+  interpretations Json @default("[]")
+  hypotheses      Json @default("[]")
+
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Float?
+  durationMs   Int?
+
+  /// Same small, generic, vendor-specific diagnostics only - see AiAnalysis.providerMetadata's doc comment; identical constraint applies here.
+  providerMetadata Json?
+
+  errorMessage String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([organizationId, days])
+  @@index([organizationId])
+  @@map("digest_ai_interpretations")
 }
 
 // Phase 4: one row per organization per reporting period (Section 4).

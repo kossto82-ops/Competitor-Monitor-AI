@@ -2,9 +2,11 @@ import {
   createMonitoringWorker,
   createAiAnalysisWorker,
   createDailyReportWorker,
+  createDigestInterpretationWorker,
   type MonitoringJobPayload,
   type AiAnalysisJobPayload,
   type DailyReportJobPayload,
+  type DigestInterpretationJobPayload,
 } from "@cma/queue";
 import {
   getMonitoringJobForOrg,
@@ -13,11 +15,14 @@ import {
   markAiAnalysisFailed,
   markReportFailed,
   getOrCreateReportPeriod,
+  getDigestAiInterpretationForOrgOrThrow,
+  markDigestAiInterpretationFailed,
 } from "@cma/db";
 import type { Job } from "bullmq";
 import { runMonitoringJob } from "./pipeline.js";
 import { runAiAnalysisJob } from "./aiPipeline.js";
 import { generateDailyReportJob } from "./reportPipeline.js";
+import { runDigestInterpretationJob } from "./digestInterpretationPipeline.js";
 
 const worker = createMonitoringWorker(async (job: Job<MonitoringJobPayload>) => {
   const result = await runMonitoringJob(job.data);
@@ -134,11 +139,50 @@ reportWorker.on("failed", (job, err) => {
     });
 });
 
+const digestInterpretationWorker = createDigestInterpretationWorker(async (job: Job<DigestInterpretationJobPayload>) => {
+  const result = await runDigestInterpretationJob(job.data);
+  console.log(
+    `[digest-interpretation-worker] job=${job.id} organizationId=${job.data.organizationId} days=${job.data.days} status=${result.status}`,
+  );
+  return result;
+});
+
+/**
+ * Same defense-in-depth as the other three workers' 'failed' handlers: a
+ * worker crash mid-job or a BullMQ stalled-job timeout can reach here
+ * without runDigestInterpretationJob's own try/catch ever running, which
+ * would otherwise leave the DigestAiInterpretation row stuck RUNNING
+ * forever - the /digest UI would then poll indefinitely for a result
+ * that will never arrive.
+ */
+digestInterpretationWorker.on("failed", (job, err) => {
+  console.error(`[digest-interpretation-worker] job=${job?.id} FAILED:`, err.message);
+
+  const digestAiInterpretationId = job?.data?.digestAiInterpretationId;
+  const organizationId = job?.data?.organizationId;
+  if (!digestAiInterpretationId || !organizationId) return;
+
+  getDigestAiInterpretationForOrgOrThrow(organizationId, digestAiInterpretationId)
+    .then((current) => {
+      if (current.status !== "COMPLETED" && current.status !== "FAILED") {
+        return markDigestAiInterpretationFailed(digestAiInterpretationId, err.message);
+      }
+      return undefined;
+    })
+    .catch((markErr: unknown) => {
+      console.error(
+        `[digest-interpretation-worker] failed to mark DigestAiInterpretation ${digestAiInterpretationId} as FAILED after job failure:`,
+        markErr,
+      );
+    });
+});
+
 console.log("[worker] listening for monitoring jobs...");
 console.log("[ai-worker] listening for AI analysis jobs...");
 console.log("[report-worker] listening for daily report jobs...");
+console.log("[digest-interpretation-worker] listening for digest interpretation jobs...");
 
 process.on("SIGTERM", async () => {
-  await Promise.all([worker.close(), aiWorker.close(), reportWorker.close()]);
+  await Promise.all([worker.close(), aiWorker.close(), reportWorker.close(), digestInterpretationWorker.close()]);
   process.exit(0);
 });

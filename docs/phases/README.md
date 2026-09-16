@@ -23,3 +23,4 @@ for that.
 | 8 | [PHASE8-DESIGN.md](PHASE8-DESIGN.md), [PHASE8-VALIDATION-REPORT.md](PHASE8-VALIDATION-REPORT.md) | Competitive Context engine (cross-competitor pattern comparison) |
 | 9 | [PHASE9-PRODUCT-DIRECTION-AUDIT.md](PHASE9-PRODUCT-DIRECTION-AUDIT.md) | Product direction & intelligence gap audit (analysis only, no code) |
 | 10 | [PHASE10-VALIDATION-REPORT.md](PHASE10-VALIDATION-REPORT.md) | Deterministic Digest (notable changes across all tracked competitors) |
+| 11 | [PHASE11-VALIDATION-REPORT.md](PHASE11-VALIDATION-REPORT.md) | Evidence-Grounded AI Interpretation (Tier 4 AI layer on the Digest) |

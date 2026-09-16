@@ -1,8 +1,10 @@
 import { safePostJson, SafeFetchError, SsrfBlockedError } from "@cma/security";
 import { buildSystemPrompt, buildUserPrompt } from "../prompt.js";
+import { buildDigestSystemPrompt, buildDigestUserPrompt } from "../digestPrompt.js";
 import { AiProviderRequestError, AiProviderTimeoutError } from "../errors.js";
 import { REQUEST_TIMEOUT_MS } from "../limits.js";
-import type { AiProvider, ChangeAnalysisInput, NormalizedAiResponse } from "../types.js";
+import { DIGEST_REQUEST_TIMEOUT_MS } from "../digestLimits.js";
+import type { AiProvider, ChangeAnalysisInput, EvidenceBundleInput, NormalizedAiResponse } from "../types.js";
 
 /**
  * Minimal Chat-Completions-shaped response - the de facto compatibility
@@ -56,6 +58,15 @@ export class OpenAiCompatibleProvider implements AiProvider {
   }
 
   async analyzeChange(input: ChangeAnalysisInput): Promise<NormalizedAiResponse> {
+    return this.request(buildSystemPrompt(), buildUserPrompt(input), this.timeoutMs);
+  }
+
+  /** Phase 11: same request/parse/error-classification machinery as analyzeChange, only the system/user prompt differs. */
+  async interpretDigest(input: EvidenceBundleInput): Promise<NormalizedAiResponse> {
+    return this.request(buildDigestSystemPrompt(), buildDigestUserPrompt(input), DIGEST_REQUEST_TIMEOUT_MS);
+  }
+
+  private async request(systemPrompt: string, userPrompt: string, timeoutMs: number): Promise<NormalizedAiResponse> {
     const url = `${this.baseUrl}/chat/completions`;
 
     let result: Awaited<ReturnType<typeof safePostJson>>;
@@ -65,21 +76,21 @@ export class OpenAiCompatibleProvider implements AiProvider {
         {
           model: this.model,
           messages: [
-            { role: "system", content: buildSystemPrompt() },
-            { role: "user", content: buildUserPrompt(input) },
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
           ],
           // Not every OpenAI-compatible endpoint supports strict
           // json_schema mode (that is largely OpenAI-specific) - the
           // widely-supported `json_object` mode is used instead, with
           // the prompt itself (shared with every other provider)
           // carrying the exact shape requirement. The real enforcement
-          // point is analyzeAndValidateChange.ts's zod validation
-          // downstream, regardless of what hint was sent here.
+          // point is analyzeAndValidateChange.ts's / validateDigestInterpretation.ts's
+          // zod validation downstream, regardless of what hint was sent here.
           response_format: { type: "json_object" },
         },
         {
           headers: { Authorization: `Bearer ${this.apiKey}` },
-          timeoutMs: this.timeoutMs,
+          timeoutMs,
         },
       );
     } catch (err) {
@@ -89,7 +100,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
         throw new AiProviderRequestError(this.name, `Refusing unsafe endpoint: ${err.message}`, false);
       }
       if (err instanceof SafeFetchError && /timed out/i.test(err.message)) {
-        throw new AiProviderTimeoutError(this.name, this.timeoutMs);
+        throw new AiProviderTimeoutError(this.name, timeoutMs);
       }
       const message = err instanceof Error ? err.message : String(err);
       throw new AiProviderRequestError(this.name, message, true);

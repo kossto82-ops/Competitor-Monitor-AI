@@ -90,4 +90,22 @@ export interface NormalizedAiResponse {
 export interface AiProvider {
   readonly name: string;
   analyzeChange(input: ChangeAnalysisInput): Promise<NormalizedAiResponse>;
+  /**
+   * Phase 11 (Tier 4): the second business-level operation this
+   * provider-neutral interface exposes - "interpret this already-
+   * qualified, multi-competitor Evidence Bundle", never "analyze this
+   * one ChangeEvent" scaled up. Same normalization/no-vendor-object-
+   * escapes contract as analyzeChange - see digestTypes.ts's
+   * EvidenceBundle for the input shape and NormalizedAiResponse's doc
+   * comment above for why the return shape is unchanged.
+   */
+  interpretDigest(input: EvidenceBundleInput): Promise<NormalizedAiResponse>;
 }
+
+/**
+ * Deliberately typed here (rather than importing digestTypes.ts's
+ * EvidenceBundle directly) only to avoid a circular import between
+ * types.ts and digestTypes.ts - digestTypes.ts's EvidenceBundle is
+ * structurally identical and is what every real caller actually passes.
+ */
+export type EvidenceBundleInput = import("./digestTypes.js").EvidenceBundle;

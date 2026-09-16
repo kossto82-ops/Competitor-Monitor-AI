@@ -1,8 +1,11 @@
 import { buildSystemPrompt, buildUserPrompt } from "../prompt.js";
+import { buildDigestSystemPrompt, buildDigestUserPrompt } from "../digestPrompt.js";
 import { aiAnalysisOutputJsonSchema } from "../schema.js";
+import { aiInterpretationOutputJsonSchema } from "../digestSchema.js";
 import { AiProviderRequestError, AiProviderTimeoutError } from "../errors.js";
 import { REQUEST_TIMEOUT_MS } from "../limits.js";
-import type { AiProvider, ChangeAnalysisInput, NormalizedAiResponse } from "../types.js";
+import { DIGEST_REQUEST_TIMEOUT_MS } from "../digestLimits.js";
+import type { AiProvider, ChangeAnalysisInput, EvidenceBundleInput, NormalizedAiResponse } from "../types.js";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 
@@ -77,8 +80,29 @@ export class OpenAiProvider implements AiProvider {
   }
 
   async analyzeChange(input: ChangeAnalysisInput): Promise<NormalizedAiResponse> {
+    return this.request(buildSystemPrompt(), buildUserPrompt(input), "ai_analysis_output", aiAnalysisOutputJsonSchema, this.timeoutMs);
+  }
+
+  /** Phase 11: same request/parse/error-classification machinery as analyzeChange, only the system/user prompt and structured-output schema differ. */
+  async interpretDigest(input: EvidenceBundleInput): Promise<NormalizedAiResponse> {
+    return this.request(
+      buildDigestSystemPrompt(),
+      buildDigestUserPrompt(input),
+      "ai_interpretation_output",
+      aiInterpretationOutputJsonSchema,
+      DIGEST_REQUEST_TIMEOUT_MS,
+    );
+  }
+
+  private async request(
+    systemPrompt: string,
+    userPrompt: string,
+    schemaName: string,
+    jsonSchema: object,
+    timeoutMs: number,
+  ): Promise<NormalizedAiResponse> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     let response: Response;
     try {
@@ -93,14 +117,14 @@ export class OpenAiProvider implements AiProvider {
         body: JSON.stringify({
           model: this.model,
           input: [
-            { role: "system", content: buildSystemPrompt() },
-            { role: "user", content: buildUserPrompt(input) },
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
           ],
           text: {
             format: {
               type: "json_schema",
-              name: "ai_analysis_output",
-              schema: aiAnalysisOutputJsonSchema,
+              name: schemaName,
+              schema: jsonSchema,
               strict: true,
             },
           },
@@ -109,7 +133,7 @@ export class OpenAiProvider implements AiProvider {
       });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        throw new AiProviderTimeoutError(this.name, this.timeoutMs);
+        throw new AiProviderTimeoutError(this.name, timeoutMs);
       }
       const message = err instanceof Error ? err.message : String(err);
       throw new AiProviderRequestError(this.name, message, true);

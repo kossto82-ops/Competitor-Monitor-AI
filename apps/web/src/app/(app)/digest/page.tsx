@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { Newspaper } from "lucide-react";
-import { getDigestForOrganization, getOrganizationById, type DigestItem } from "@cma/db";
+import { getDigestForOrganization, getDigestAiInterpretationForOrg, getOrganizationById, type DigestItem } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FirstRunExplainer } from "@/components/app/FirstRunExplainer";
+import { DigestAiInterpretationPanel } from "@/components/app/DigestAiInterpretationPanel";
 import { changeTypeDisplay, severityDisplay } from "@/lib/statusDisplay";
 import { activityDetailText, activityDirectionLabel } from "@/lib/patternDisplay";
 import { formatDateTime } from "@/lib/formatTime";
@@ -98,6 +99,11 @@ export default async function DigestPage({ searchParams }: PageProps) {
 
   const organization = await getOrganizationById(session.organizationId);
   const digest = await getDigestForOrganization(session.organizationId, days, organization?.timezone);
+  // Phase 11: the AI interpretation layer is a separate, optional read - never a prerequisite
+  // for the deterministic Digest above. A brand-new organization skips this fetch entirely
+  // (see the early return just below), never showing an "Interpret" control before there is
+  // anything at all to interpret.
+  const aiInterpretation = digest.totalTrackedCompetitors > 0 ? await getDigestAiInterpretationForOrg(session.organizationId, days) : null;
 
   if (digest.totalTrackedCompetitors === 0) {
     return (
@@ -155,6 +161,8 @@ export default async function DigestPage({ searchParams }: PageProps) {
           </Link>
         </CardContent>
       </Card>
+
+      <DigestAiInterpretationPanel days={days} initialInterpretation={aiInterpretation} />
 
       <Card className="overflow-hidden">
         <CardHeader>

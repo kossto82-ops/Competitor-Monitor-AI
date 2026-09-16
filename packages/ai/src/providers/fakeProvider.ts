@@ -1,4 +1,4 @@
-import type { AiProvider, ChangeAnalysisInput, NormalizedAiResponse } from "../types.js";
+import type { AiProvider, ChangeAnalysisInput, EvidenceBundleInput, NormalizedAiResponse } from "../types.js";
 
 /**
  * Deterministic test double for AiProvider (Section 11/26: "the fake
@@ -27,6 +27,10 @@ export interface FakeAiProviderOptions {
   throwError?: () => Error;
   /** Number of calls (starting at 1) that should fail via throwError before succeeding. */
   failFirstNCalls?: number;
+  /** Phase 11: same `respond`/`throwError` shape as analyzeChange, for the interpretDigest operation. */
+  respondDigest?: (input: EvidenceBundleInput) => string | Promise<string>;
+  throwErrorDigest?: () => Error;
+  failFirstNDigestCalls?: number;
 }
 
 function defaultCannedResponse(input: ChangeAnalysisInput): string {
@@ -53,13 +57,49 @@ function defaultCannedResponse(input: ChangeAnalysisInput): string {
   });
 }
 
-export function createFakeAiProvider(options: FakeAiProviderOptions = {}): AiProvider & { callCount: number } {
+/**
+ * Deterministic canned Tier-4 response - always cites the first
+ * evidenceChangeEventId of the first competitor/item it finds, so a
+ * test asserting "evidence links work" has something real to click
+ * without depending on real-model output. Returns the brief's own
+ * "insufficient evidence" shape when the bundle has nothing to interpret.
+ */
+function defaultCannedDigestResponse(input: EvidenceBundleInput): string {
+  const firstCompetitor = input.competitors[0];
+  const firstItem = firstCompetitor?.items[0];
+  if (!firstCompetitor || !firstItem) {
+    return JSON.stringify({
+      summary: "There is not enough verified activity in this period to interpret.",
+      observations: [],
+      interpretations: [],
+      hypotheses: [],
+    });
+  }
+
+  const evidenceChangeEventIds = firstItem.evidenceChangeEventIds;
+  return JSON.stringify({
+    summary: `Fake interpretation of ${input.competitors.length} tracked competitor(s) over the last ${input.period.days} days.`,
+    observations: [
+      { text: `${firstCompetitor.competitorName} has verified activity in this period.`, evidenceChangeEventIds },
+    ],
+    interpretations: [],
+    hypotheses: [],
+  });
+}
+
+export function createFakeAiProvider(
+  options: FakeAiProviderOptions = {},
+): AiProvider & { callCount: number; digestCallCount: number } {
   let callCount = 0;
+  let digestCallCount = 0;
 
   return {
     name: "fake",
     get callCount() {
       return callCount;
+    },
+    get digestCallCount() {
+      return digestCallCount;
     },
     async analyzeChange(input: ChangeAnalysisInput): Promise<NormalizedAiResponse> {
       callCount += 1;
@@ -70,6 +110,16 @@ export function createFakeAiProvider(options: FakeAiProviderOptions = {}): AiPro
 
       const content = options.respond ? await options.respond(input) : defaultCannedResponse(input);
       return { content, inputTokens: 100, outputTokens: 50, totalTokens: 150, finishReason: "stop" };
+    },
+    async interpretDigest(input: EvidenceBundleInput): Promise<NormalizedAiResponse> {
+      digestCallCount += 1;
+
+      if (options.throwErrorDigest && (options.failFirstNDigestCalls === undefined || digestCallCount <= options.failFirstNDigestCalls)) {
+        throw options.throwErrorDigest();
+      }
+
+      const content = options.respondDigest ? await options.respondDigest(input) : defaultCannedDigestResponse(input);
+      return { content, inputTokens: 200, outputTokens: 80, totalTokens: 280, finishReason: "stop" };
     },
   };
 }
