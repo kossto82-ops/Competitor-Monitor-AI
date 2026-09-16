@@ -299,5 +299,310 @@ describe.skipIf(!reachable)("patterns repository (Phase 7)", () => {
       const result = await getRepeatedPriceChangePatterns(org.id, comp.id, 30);
       expect(result).toEqual([]);
     });
+
+    it("excludes a price change exactly at `now` (the end of the window is exclusive)", async () => {
+      const org = await makeOrg("RepeatedNowBoundary");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://l.example.test", category: "PRICING_PAGE" });
+      const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+
+      await createChangeEvent(org.id, url.id, { entityKey: "pro-plan", detectedAt: new Date(referenceNow.getTime() - 1 * DAY) });
+      await createChangeEvent(org.id, url.id, { entityKey: "pro-plan", detectedAt: referenceNow }); // excluded: `lt: now`
+
+      const result = await getRepeatedPriceChangePatterns(org.id, comp.id, 30, referenceNow);
+      expect(result[0]?.changeCount).toBe(1);
+    });
+
+    it("includes a price change exactly at the window start (the start of the window is inclusive)", async () => {
+      const org = await makeOrg("RepeatedStartBoundary");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://m.example.test", category: "PRICING_PAGE" });
+      const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+      const days = 30;
+      const windowStart = new Date(referenceNow.getTime() - days * DAY);
+
+      await createChangeEvent(org.id, url.id, { entityKey: "pro-plan", detectedAt: windowStart }); // included: `gte: windowStart`
+      await createChangeEvent(org.id, url.id, { entityKey: "pro-plan", detectedAt: new Date(windowStart.getTime() - 1) }); // 1ms before the window: excluded
+
+      const result = await getRepeatedPriceChangePatterns(org.id, comp.id, days, referenceNow);
+      expect(result[0]?.changeCount).toBe(1);
+    });
+  });
+
+  /**
+   * Phase 7.1: traces the exact canonical window model documented on
+   * getActivityPattern's doc comment - see PHASE7.1-VALIDATION-REPORT.md
+   * "Window Semantics" for the full worked table this test matrix proves.
+   * With D=30: Historical 1 = [now-60d, now-30d), Historical 2 =
+   * [now-90d, now-60d), Historical 3 = [now-120d, now-90d). Because
+   * windows are evaluated most-recent-first, MIN_QUALIFYING_BASELINE_WINDOWS
+   * (2) is only reached once BOTH Historical 1 and Historical 2 qualify,
+   * which requires >= 90 days of tracked history - NOT 60. This is the
+   * exact ambiguity Phase 7.1 was asked to resolve: the pattern first
+   * becomes usable at 90 days (2 of 3 historical windows), and the full
+   * 3-window baseline only activates at 120 days.
+   */
+  describe("getActivityPattern - window semantics (Phase 7.1)", () => {
+    const days = 30;
+    const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+
+    it.each([
+      { trackedDays: 30, expectedQualifyingWindows: 0, expectedQualifies: false },
+      { trackedDays: 59, expectedQualifyingWindows: 0, expectedQualifies: false },
+      { trackedDays: 60, expectedQualifyingWindows: 1, expectedQualifies: false }, // Historical 1 alone is not enough
+      { trackedDays: 61, expectedQualifyingWindows: 1, expectedQualifies: false },
+      { trackedDays: 75, expectedQualifyingWindows: 1, expectedQualifies: false }, // the brief's own worked "75 days -> 15-day partial" example
+      { trackedDays: 89, expectedQualifyingWindows: 1, expectedQualifies: false },
+      { trackedDays: 90, expectedQualifyingWindows: 2, expectedQualifies: true }, // FIRST day the pattern can ever qualify
+      { trackedDays: 91, expectedQualifyingWindows: 2, expectedQualifies: true },
+      { trackedDays: 119, expectedQualifyingWindows: 2, expectedQualifies: true }, // Historical 3 still partial - not counted
+      { trackedDays: 120, expectedQualifyingWindows: 3, expectedQualifies: true }, // full 3-window baseline
+    ])("competitor tracked for exactly $trackedDays days -> qualifyingWindows=$expectedQualifyingWindows, qualifies=$expectedQualifies", async ({ trackedDays, expectedQualifyingWindows, expectedQualifies }) => {
+      const org = await makeOrg(`Window${trackedDays}`);
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - trackedDays * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: `https://window-${trackedDays}.example.test`, category: "GENERAL" });
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - 5 * DAY) }); // one current-window event, irrelevant to qualification
+
+      const pattern = await getActivityPattern(org.id, comp.id, days, referenceNow);
+      expect(pattern.qualifyingWindows).toBe(expectedQualifyingWindows);
+      expect(pattern.qualifies).toBe(expectedQualifies);
+    });
+
+    it("a partial (not-yet-tracked) historical window's events never count toward the baseline, even if rows exist in that range", async () => {
+      const org = await makeOrg("PartialWindowInvariant");
+      // Tracked exactly 90 days -> Historical 1 + 2 qualify, Historical 3 (90-120 days ago) does NOT.
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 90 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://partial-window.example.test", category: "GENERAL" });
+
+      // Historical 1 (30-60d ago): 1 event. Historical 2 (60-90d ago): 1 event.
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - 45 * DAY) });
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - 75 * DAY) });
+      // Historical 3 (90-120d ago): 5 events that pre-date competitor.createdAt - the query for
+      // this window is never even issued (Historical 3 doesn't qualify at 90 tracked days), so
+      // these must NOT change baselineAverage/qualifyingWindows (Invariant B).
+      for (let i = 0; i < 5; i += 1) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - (91 + i) * DAY) });
+      }
+
+      const pattern = await getActivityPattern(org.id, comp.id, days, referenceNow);
+      expect(pattern.qualifyingWindows).toBe(2);
+      expect(pattern.baselineAverage).toBe(1); // mean(1, 1) - the 5 pre-tracking events must not be averaged in
+    });
+
+    it("events beyond the full 4-window analysis horizon (older than 120 days for D=30) never affect the baseline (Invariant D)", async () => {
+      const org = await makeOrg("BeyondHorizon");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 500 * DAY)); // tracked long enough for a full baseline
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://beyond-horizon.example.test", category: "GENERAL" });
+
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - 45 * DAY) }); // Historical 1
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - 75 * DAY) }); // Historical 2
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - 105 * DAY) }); // Historical 3
+      // Way outside any of the 4 windows (older than 120 days) - must never be counted.
+      for (let i = 0; i < 10; i += 1) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - (200 + i * 10) * DAY) });
+      }
+
+      const pattern = await getActivityPattern(org.id, comp.id, days, referenceNow);
+      expect(pattern.qualifyingWindows).toBe(3);
+      expect(pattern.baselineAverage).toBe(1); // mean(1, 1, 1), unaffected by the 10 out-of-horizon events
+    });
+
+    it("adding more current-window events does not change qualifyingWindows (Invariant A: history-window count depends only on elapsed tracked time)", async () => {
+      const org = await makeOrg("MoreEventsInvariant");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 90 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://more-events.example.test", category: "GENERAL" });
+
+      const before = await getActivityPattern(org.id, comp.id, days, referenceNow);
+      for (let i = 0; i < 20; i += 1) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - i * DAY) });
+      }
+      const after = await getActivityPattern(org.id, comp.id, days, referenceNow);
+
+      expect(after.qualifyingWindows).toBe(before.qualifyingWindows);
+    });
+
+    it("excludes a ChangeEvent exactly at `now` from the current window (half-open interval, end exclusive)", async () => {
+      const org = await makeOrg("ActivityNowBoundary");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 100 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://activity-now.example.test", category: "GENERAL" });
+
+      await createChangeEvent(org.id, url.id, { detectedAt: referenceNow }); // excluded: `lt: now`
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - 1) }); // 1ms before now: included
+
+      const pattern = await getActivityPattern(org.id, comp.id, days, referenceNow);
+      expect(pattern.current).toBe(1);
+    });
+
+    it("includes a ChangeEvent exactly at the current window's start (half-open interval, start inclusive)", async () => {
+      const org = await makeOrg("ActivityStartBoundary");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 100 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://activity-start.example.test", category: "GENERAL" });
+      const windowStart = new Date(referenceNow.getTime() - days * DAY);
+
+      await createChangeEvent(org.id, url.id, { detectedAt: windowStart }); // included: `gte: windowStart`
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(windowStart.getTime() - 1) }); // just before: excluded (falls in Historical 1)
+
+      const pattern = await getActivityPattern(org.id, comp.id, days, referenceNow);
+      expect(pattern.current).toBe(1);
+    });
+
+    it("adjacent windows never double-count an event at their shared boundary", async () => {
+      const org = await makeOrg("AdjacentBoundary");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 120 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://adjacent.example.test", category: "GENERAL" });
+      // Exactly on the Historical1/Historical2 boundary (now - 60d): belongs to Historical 2
+      // (Historical 2 = [now-90d, now-60d)) per the half-open convention, never both.
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - 60 * DAY) });
+
+      const pattern = await getActivityPattern(org.id, comp.id, days, referenceNow);
+      // 3 qualifying windows, total events across all 3 = 1 -> mean = 1/3, not double-counted into 2/3.
+      expect(pattern.baselineAverage).toBe(Math.round((1 / 3) * 100) / 100);
+    });
+  });
+
+  /**
+   * Phase 7.1: the lifecycle sequences required by the audit brief, plus
+   * the "contradictory sequence" defensive case (Section 10) and the very
+   * common real-world case of a product that already existed before
+   * monitoring started (no PRODUCT_ADDED origin at all).
+   */
+  describe("getEntityHistoryForCompetitor - lifecycle sequences (Phase 7.1)", () => {
+    async function seedSequence(orgId: string, urlId: string, entityKey: string, types: ChangeType[]) {
+      const now = Date.now();
+      for (const [i, changeType] of types.entries()) {
+        await createChangeEvent(orgId, urlId, { changeType, entityKey, detectedAt: new Date(now - (types.length - i) * DAY) });
+      }
+    }
+
+    it("Sequence A: PRODUCT_ADDED alone -> currentlyDetected=true", async () => {
+      const org = await makeOrg("SeqA");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://seq-a.example.test", category: "PRICING_PAGE" });
+      await seedSequence(org.id, url.id, "seq-a", ["PRODUCT_ADDED"]);
+
+      const result = await getEntityHistoryForCompetitor(org.id, comp.id);
+      expect(result[0]?.currentlyDetected).toBe(true);
+      expect(result[0]?.events.map((e) => e.changeType)).toEqual(["PRODUCT_ADDED"]);
+    });
+
+    it("Sequence B: PRODUCT_ADDED -> PRICE_CHANGE -> currentlyDetected=true", async () => {
+      const org = await makeOrg("SeqB");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://seq-b.example.test", category: "PRICING_PAGE" });
+      await seedSequence(org.id, url.id, "seq-b", ["PRODUCT_ADDED", "PRICE_CHANGE"]);
+
+      const result = await getEntityHistoryForCompetitor(org.id, comp.id);
+      expect(result[0]?.currentlyDetected).toBe(true);
+      expect(result[0]?.priceChangeCount).toBe(1);
+    });
+
+    it("Sequence C: PRODUCT_ADDED -> PRICE_CHANGE -> PRODUCT_REMOVED -> currentlyDetected=false", async () => {
+      const org = await makeOrg("SeqC");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://seq-c.example.test", category: "PRICING_PAGE" });
+      await seedSequence(org.id, url.id, "seq-c", ["PRODUCT_ADDED", "PRICE_CHANGE", "PRODUCT_REMOVED"]);
+
+      const result = await getEntityHistoryForCompetitor(org.id, comp.id);
+      expect(result[0]?.currentlyDetected).toBe(false);
+    });
+
+    it("Sequence D: PRODUCT_ADDED -> PRICE_CHANGE -> PRODUCT_REMOVED -> PRODUCT_ADDED -> currentlyDetected=true", async () => {
+      const org = await makeOrg("SeqD");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://seq-d.example.test", category: "PRICING_PAGE" });
+      await seedSequence(org.id, url.id, "seq-d", ["PRODUCT_ADDED", "PRICE_CHANGE", "PRODUCT_REMOVED", "PRODUCT_ADDED"]);
+
+      const result = await getEntityHistoryForCompetitor(org.id, comp.id);
+      expect(result[0]?.currentlyDetected).toBe(true);
+      expect(result[0]?.events).toHaveLength(4);
+    });
+
+    it("Sequence E: PRODUCT_ADDED -> PRODUCT_REMOVED -> PRODUCT_ADDED -> PRICE_CHANGE -> currentlyDetected=true", async () => {
+      const org = await makeOrg("SeqE");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://seq-e.example.test", category: "PRICING_PAGE" });
+      await seedSequence(org.id, url.id, "seq-e", ["PRODUCT_ADDED", "PRODUCT_REMOVED", "PRODUCT_ADDED", "PRICE_CHANGE"]);
+
+      const result = await getEntityHistoryForCompetitor(org.id, comp.id);
+      expect(result[0]?.currentlyDetected).toBe(true);
+      expect(result[0]?.priceChangeCount).toBe(1);
+    });
+
+    it("a lone PRICE_CHANGE with no prior PRODUCT_ADDED (a product that already existed when monitoring started) is still a valid, currently-detected entity history", async () => {
+      const org = await makeOrg("PreExisting");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://pre-existing.example.test", category: "PRICING_PAGE" });
+      await seedSequence(org.id, url.id, "pre-existing-plan", ["PRICE_CHANGE"]);
+
+      const result = await getEntityHistoryForCompetitor(org.id, comp.id);
+      expect(result[0]?.currentlyDetected).toBe(true);
+      expect(result[0]?.events[0]?.changeType).toBe("PRICE_CHANGE");
+    });
+
+    it("(Section 10) a contradictory PRODUCT_REMOVED -> PRICE_CHANGE sequence - which the real detection pipeline (compare.ts) cannot itself produce, since a PRICE_CHANGE is only ever emitted for an entity present in BOTH the prior and current snapshot of one transition, while PRODUCT_REMOVED means the entity was absent from the current snapshot - is still read defensively: currentlyDetected reflects the chronologically LAST event, never crashes, and never fabricates an implied re-addition", async () => {
+      const org = await makeOrg("Contradictory");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://contradictory.example.test", category: "PRICING_PAGE" });
+      await seedSequence(org.id, url.id, "contradictory-plan", ["PRODUCT_ADDED", "PRODUCT_REMOVED", "PRICE_CHANGE"]);
+
+      const result = await getEntityHistoryForCompetitor(org.id, comp.id);
+      expect(result[0]?.events).toHaveLength(3);
+      expect(result[0]?.currentlyDetected).toBe(true); // last event is PRICE_CHANGE, not PRODUCT_REMOVED
+    });
+
+    it("(Invariant E) lifecycle state is derived from chronological detectedAt order, not database insertion order", async () => {
+      const org = await makeOrg("InsertionOrder");
+      const comp = await createCompetitor(org.id, { name: "Comp" });
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://insertion-order.example.test", category: "PRICING_PAGE" });
+      const now = Date.now();
+
+      // Inserted out of chronological order: the REMOVED row (earlier detectedAt) is written
+      // to the database AFTER the ADDED row (later detectedAt) that logically follows it.
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_ADDED", entityKey: "reorder-plan", detectedAt: new Date(now - 1 * DAY) });
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_REMOVED", entityKey: "reorder-plan", detectedAt: new Date(now - 2 * DAY) });
+
+      const result = await getEntityHistoryForCompetitor(org.id, comp.id);
+      // Chronologically (by detectedAt), REMOVED (2 days ago) happened before ADDED (1 day ago) -
+      // so the entity is currently detected, regardless of the order the rows were inserted in.
+      expect(result[0]?.events.map((e) => e.changeType)).toEqual(["PRODUCT_REMOVED", "PRODUCT_ADDED"]);
+      expect(result[0]?.currentlyDetected).toBe(true);
+    });
+  });
+
+  describe("tenant isolation - pattern-level (Phase 7.1, Invariant C)", () => {
+    it("organization B's activity pattern is never influenced by organization A's ChangeEvents, even for the same days/window shape", async () => {
+      const orgA = await makeOrg("InvariantCA");
+      const orgB = await makeOrg("InvariantCB");
+      const compA = await makeCompetitor(orgA.id, "A", new Date(Date.now() - 200 * DAY));
+      const compB = await makeCompetitor(orgB.id, "B", new Date(Date.now() - 200 * DAY));
+      const urlA = await createMonitoredUrl(orgA.id, compA.id, { url: "https://invariant-c-a.example.test", category: "GENERAL" });
+      const urlB = await createMonitoredUrl(orgB.id, compB.id, { url: "https://invariant-c-b.example.test", category: "GENERAL" });
+
+      // Org A gets heavy activity in every window; Org B gets none.
+      for (let i = 0; i < 20; i += 1) {
+        await createChangeEvent(orgA.id, urlA.id, { detectedAt: new Date(Date.now() - i * DAY) });
+      }
+
+      const patternA = await getActivityPattern(orgA.id, compA.id, 30);
+      const patternB = await getActivityPattern(orgB.id, compB.id, 30);
+
+      expect(patternA.current).toBeGreaterThan(0);
+      expect(patternB.current).toBe(0);
+      expect(patternB.baselineAverage).toBe(0);
+    });
+
+    it("organization B's repeated-price-change pattern never surfaces organization A's entities", async () => {
+      const orgA = await makeOrg("InvariantCRepeatA");
+      const orgB = await makeOrg("InvariantCRepeatB");
+      const compA = await createCompetitor(orgA.id, { name: "A" });
+      const compB = await createCompetitor(orgB.id, { name: "B" });
+      const urlA = await createMonitoredUrl(orgA.id, compA.id, { url: "https://invariant-c-repeat-a.example.test", category: "PRICING_PAGE" });
+
+      await createChangeEvent(orgA.id, urlA.id, { entityKey: "shared-name-plan" });
+      await createChangeEvent(orgA.id, urlA.id, { entityKey: "shared-name-plan" });
+
+      const patternsB = await getRepeatedPriceChangePatterns(orgB.id, compB.id, 30);
+      expect(patternsB).toEqual([]);
+    });
   });
 });

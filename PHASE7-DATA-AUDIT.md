@@ -116,10 +116,17 @@ Formal definitions (implemented in `packages/db/src/repositories/patterns.ts`):
   immediately preceding the current window (i.e. `[now-4·days, now-days)`
   sliced into 3 equal windows). `ratio = current / baselineAverage` when
   `baselineAverage > 0`.
-- **Minimum sample size:** requires **at least 2** of those 3 prior windows
-  to be "in range" of the competitor's actual monitoring history — i.e.
-  `Competitor.createdAt <= now - 2·days` at minimum, `now - 4·days` for the
-  full 3-window baseline. Fewer than 2 usable prior windows →
+- **Minimum sample size:** requires **at least 2 of the 3 HISTORICAL
+  windows** (never counting the current window as a "baseline window") to
+  be "in range" of the competitor's actual monitoring history. Because
+  windows are evaluated most-recent-first, reaching 2 qualifying windows
+  always means "historical window 1 AND 2 both qualify," which requires
+  `Competitor.createdAt <= now - 3·days` — **NOT** `now - 2·days` (a
+  documentation error corrected in Phase 7.1; the implementation itself
+  was already correct). The full 3-window baseline requires
+  `Competitor.createdAt <= now - 4·days`. See
+  `PHASE7.1-VALIDATION-REPORT.md`, "Window Semantics," for the complete
+  worked table. Fewer than 2 usable historical windows →
   `qualifies: false`, `direction: "INSUFFICIENT_HISTORY"`; the caller MUST
   render that as "not enough history yet," never as a claimed trend.
 - **Edge cases:** `baselineAverage === 0` and `current === 0` →

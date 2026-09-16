@@ -53,12 +53,28 @@ the known product-rename failure mode.
 
 ### 5.1 Activity-vs-baseline (`getActivityPattern`)
 
+> **Terminology fixed in Phase 7.1** — see `PHASE7.1-VALIDATION-REPORT.md`
+> "Window Semantics" for the full canonical model and worked table. The
+> arithmetic below was always correct in code; only this document's prose
+> previously understated the minimum history required (said "2×days",
+> should have said "3×days"). One genuine implementation bug was also
+> found and fixed in Phase 7.1: `qualifyingWindows` was incorrectly
+> reported as `0` whenever the pattern did not qualify, even when 1
+> historical window genuinely qualified — see Phase 7.1 report Section
+> "90-Day Claim" and its Section 6.
+
 - **Formula:** current = count of `ChangeEvent`s in `[now-days, now)`.
-  Baseline = mean count over up to 3 consecutive prior `days`-length
-  windows. `ratio = current / baselineAverage` when `baselineAverage > 0`.
-- **Minimum history:** requires ≥2 of the 3 prior windows to fall within
-  `Competitor.createdAt..now` (i.e. at least `2 × days` of real monitoring
-  history) to `qualify`; fewer → `direction: "INSUFFICIENT_HISTORY"`.
+  Baseline = mean count over up to 3 consecutive, non-overlapping
+  **HISTORICAL** `days`-length windows immediately preceding the current
+  window (current is never counted as one of the 3). `ratio = current /
+  baselineAverage` when `baselineAverage > 0`.
+- **Minimum history:** requires ≥2 of the 3 HISTORICAL windows to fall
+  within `Competitor.createdAt..now` to `qualify`. Because windows are
+  evaluated most-recent-first, this always means "historical window 1 AND
+  2," which requires **at least `3 × days`** of tracked history (e.g. 90
+  days when `days = 30`) — not `2 × days` (60 days). The full 3-window
+  baseline requires `4 × days` (120 days when `days = 30`). Fewer than 2
+  qualifying historical windows → `direction: "INSUFFICIENT_HISTORY"`.
 - **Edge case handling:** `baselineAverage === 0` with `current > 0` sets
   `strongEvidence: false` (no fabricated multiplier against zero — the
   brief's own "1 vs 0 is not dramatic" example, Section 9).
@@ -169,7 +185,8 @@ Real Postgres (native, already running on this machine per
 real seeded data, viewed in the actual browser:
 
 - Seeded one organization, one competitor (backdated `createdAt` to 150
-  days ago so the 90-day/3-window baseline qualifies), one monitored URL,
+  days ago, well past the 90-day minimum for the pattern to qualify at
+  all - see Phase 7.1's corrected window semantics), one monitored URL,
   and 7 real `ChangeEvent` rows spanning 105 days ago to 1 day ago (3
   `basic-plan` price changes spread across the 3 baseline windows, one
   `pro-plan` PRODUCT_ADDED + 2 PRICE_CHANGEs in the current window, one
@@ -244,13 +261,15 @@ the 90-day mark where the activity-vs-baseline pattern first qualifies.
   captured as a repeatable spec. Same gap Phase 6 flagged for its own new
   pages; recommend a combined pass adding Playwright coverage for both
   Phase 6 and Phase 7's UI additions together.
-- **Baseline requires 2×days of monitoring history minimum** — a
-  brand-new competitor will show "not enough history yet" for weeks. This
-  is a deliberate honesty constraint (Section 4.1 of the data audit), not
-  a bug, but it does mean the pattern layer's value is invisible at
-  signup time — worth setting customer expectations about in onboarding
-  copy (not addressed in this phase; a product-copy concern, not a data
-  concern).
+- **Baseline requires 3×days (90 days at the default 30-day window) of
+  monitoring history minimum before it can ever qualify** — a brand-new
+  competitor will show "not enough history yet" for the first 3 months.
+  This is a deliberate honesty constraint (Section 4.1 of the data
+  audit), not a bug, but it does mean the pattern layer's value is
+  invisible at signup time — worth setting customer expectations about in
+  onboarding copy (not addressed in this phase; a product-copy concern,
+  not a data concern). Corrected from an earlier ("2×days") documentation
+  error in Phase 7.1.
 
 ## 16. Deferred Features (deliberate, not oversights)
 

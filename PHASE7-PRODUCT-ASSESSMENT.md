@@ -22,13 +22,22 @@ the arithmetic is running over evidence nobody else was collecting.
 
 ## Value growth over time
 
+All day counts below assume the customer is viewing the **30-day** period
+(the default of the app's 7/30/90-day selector) — see
+`PHASE7.1-VALIDATION-REPORT.md`, "Window Semantics," for the exact,
+previously-ambiguous canonical window model this table is now precise
+about. For a different selected period `D`, substitute `D` for 30
+throughout (e.g. the "first qualifies" milestone is always `3 × D` days,
+the "full baseline" milestone is always `4 × D` days).
+
 | Age of monitoring | What becomes possible |
 |---|---|
 | Day 1 | Nothing yet — a baseline snapshot, no ChangeEvents |
 | 7–30 days | First verified changes, basic activity counts (Phase 6) |
-| 30–60 days | Product lifecycle counts become meaningful (added/removed with a real "previous period" to compare against) |
-| 60–90 days | **Activity-vs-baseline patterns start qualifying** (2 baseline windows) — the first genuinely new Phase 7 capability |
-| 90–120 days | Full 3-window baseline; entity histories long enough to show a product's full added→repriced→(maybe removed) arc |
+| 30–90 days | Product lifecycle counts become meaningful (added/removed with a real "previous period" to compare against); the activity-vs-baseline pattern exists but reports `INSUFFICIENT_HISTORY` throughout this range — it has not yet accumulated the 2 qualifying historical windows it requires |
+| **90 days exactly** | **Activity-vs-baseline pattern first qualifies** — using 2 of its 3 historical windows (Historical 1: 30-60 days ago, Historical 2: 60-90 days ago). This is the first genuinely new Phase 7 capability becoming available, and it activates in one step at day 90, not gradually across a 60-90 day range |
+| 90–120 days | Pattern remains qualified using the same 2 historical windows; entity histories long enough to show a product's full added→repriced→(maybe removed) arc |
+| **120 days exactly** | **Full 3-window baseline** — Historical 3 (90-120 days ago) joins the average, making the baseline slightly more stable/representative |
 | 180 days+ | Multiple qualifying pattern windows across several products; a customer can see whether a competitor's pricing cadence has been consistent or has shifted |
 | 1 year+ | Enough history that a future cross-competitor pattern comparison (deferred this phase, see below) would itself have a defensible baseline on both sides |
 
