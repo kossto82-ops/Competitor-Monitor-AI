@@ -18,6 +18,7 @@
 import { calculatePeriodDelta, resolveComparisonWindow, type PeriodDelta } from "@cma/core";
 import type { ChangeType } from "../../generated/client/index.js";
 import { prisma } from "../client.js";
+import { getActivityPattern, getRepeatedPriceChangePatterns, type ActivityPattern } from "./patterns.js";
 
 const CHANGE_TYPES: ChangeType[] = ["PRICE_CHANGE", "PRODUCT_ADDED", "PRODUCT_REMOVED", "PROMOTION_CHANGE", "CONTENT_CHANGE"];
 
@@ -308,13 +309,83 @@ export async function compareCompetitors(
 }
 
 async function getLatestChangeEventAtForCompetitor(organizationId: string, competitorId: string): Promise<Date | null> {
+  const latest = await getLatestChangeEventForCompetitor(organizationId, competitorId);
+  return latest?.detectedAt ?? null;
+}
+
+interface LatestChangeEventRef {
+  id: string;
+  detectedAt: Date;
+}
+
+/**
+ * Phase 8: same query as getLatestChangeEventAtForCompetitor but also
+ * returns the ChangeEvent id, so a caller (getCompetitiveContext) can link
+ * directly to its evidence page (/changes/[id]) instead of only showing a
+ * bare, unlinked date - see PHASE8-DESIGN.md Section 2/8.
+ */
+async function getLatestChangeEventForCompetitor(organizationId: string, competitorId: string): Promise<LatestChangeEventRef | null> {
   const urls = await prisma.monitoredUrl.findMany({ where: { organizationId, competitorId }, select: { id: true } });
   const urlIds = urls.map((u) => u.id);
   if (urlIds.length === 0) return null;
   const latest = await prisma.changeEvent.findFirst({
     where: { organizationId, monitoredUrlId: { in: urlIds } },
     orderBy: { detectedAt: "desc" },
-    select: { detectedAt: true },
+    select: { id: true, detectedAt: true },
   });
-  return latest?.detectedAt ?? null;
+  return latest ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8: Competitive Context - purely descriptive, per-competitor-own-
+// history extension of compareCompetitors. See PHASE8-DESIGN.md.
+// ---------------------------------------------------------------------------
+
+export interface CompetitiveContextRow extends CompetitorComparisonRow {
+  latestChangeEventId: string | null;
+  /** The exact Phase 7 ActivityPattern for this competitor - own-history baseline only, never a cross-competitor or market baseline. */
+  activityPattern: ActivityPattern;
+  /** Count of entities (monitoredUrlId/entityKey pairs) whose price-change count in the window meets RepeatedPriceChangePattern.qualifies - never the total count of all entities that had any price change. */
+  qualifyingRepeatedPriceChangeCount: number;
+}
+
+/**
+ * Phase 8: extends compareCompetitors' descriptive per-competitor row with
+ * the Phase 7 pattern layer, reused verbatim (no new baseline formula, no
+ * new window model - see PHASE7.1-VALIDATION-REPORT.md "Phase 8
+ * Readiness" and PHASE8-DESIGN.md Section 3/4). Still no ranking: rows
+ * come back in the same competitorIds order as compareCompetitors, and
+ * every competitor's pattern is computed only against ITS OWN accumulated
+ * history, never against another competitor's or a market average.
+ *
+ * Query cost is bounded by the number of SELECTED competitors (a small,
+ * customer-controlled set), not by event volume - each competitor's
+ * pattern/repeated-price calls run in parallel via Promise.all, matching
+ * compareCompetitors' own existing per-competitor parallelism.
+ */
+export async function getCompetitiveContext(
+  organizationId: string,
+  competitorIds: string[],
+  days: number,
+  timezone: string | null | undefined = "UTC",
+): Promise<CompetitiveContextRow[]> {
+  if (competitorIds.length === 0) return [];
+
+  const baseRows = await compareCompetitors(organizationId, competitorIds, days, timezone);
+
+  return Promise.all(
+    baseRows.map(async (row): Promise<CompetitiveContextRow> => {
+      const [latest, activityPattern, repeatedPricePatterns] = await Promise.all([
+        getLatestChangeEventForCompetitor(organizationId, row.competitorId),
+        getActivityPattern(organizationId, row.competitorId, days),
+        getRepeatedPriceChangePatterns(organizationId, row.competitorId, days),
+      ]);
+      return {
+        ...row,
+        latestChangeEventId: latest?.id ?? null,
+        activityPattern,
+        qualifyingRepeatedPriceChangeCount: repeatedPricePatterns.filter((p) => p.qualifies).length,
+      };
+    }),
+  );
 }

@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Columns3 } from "lucide-react";
-import { compareCompetitors, getOrganizationById, listCompetitorsForOrg } from "@cma/db";
+import { getCompetitiveContext, getOrganizationById, listCompetitorsForOrg } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatPeriodDeltaLabel } from "@/lib/periodDisplay";
 import { formatDateTime } from "@/lib/formatTime";
+import { activityDetailText, activityDirectionLabel } from "@/lib/patternDisplay";
 
 const VALID_PERIOD_DAYS = [7, 30, 90] as const;
 
@@ -32,6 +34,12 @@ function normalizeCompetitorIds(value: string | string[] | undefined): string[] 
  * packages/db/src/repositories/intelligence.ts's compareCompetitors doc
  * comment and PHASE6-VALIDATION.md's Product Assessment section for why.
  *
+ * Phase 8 (PHASE8-DESIGN.md): extends the same table with each
+ * competitor's own Phase 7 activity-vs-baseline pattern and repeated
+ * price-change count via getCompetitiveContext - still no ranking, no
+ * global/market baseline; every competitor is still only ever compared
+ * against ITS OWN accumulated history.
+ *
  * Plain GET form + checkboxes, no client JS, matching the Changes page's
  * filter pattern (Section 21 asks for a page, not a JS framework
  * detour).
@@ -48,7 +56,7 @@ export default async function ComparePage({ searchParams }: PageProps) {
     getOrganizationById(session.organizationId),
   ]);
 
-  const rows = selectedIds.length > 0 ? await compareCompetitors(session.organizationId, selectedIds, days, organization?.timezone) : [];
+  const rows = selectedIds.length > 0 ? await getCompetitiveContext(session.organizationId, selectedIds, days, organization?.timezone) : [];
 
   return (
     <div className="space-y-6">
@@ -125,7 +133,7 @@ export default async function ComparePage({ searchParams }: PageProps) {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className="w-full min-w-[860px] text-left text-sm" data-testid="compare-table">
               <thead>
                 <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                   <th className="px-5 py-3 font-medium">Competitor</th>
@@ -133,30 +141,63 @@ export default async function ComparePage({ searchParams }: PageProps) {
                   <th className="px-5 py-3 font-medium">Price changes</th>
                   <th className="px-5 py-3 font-medium">Added</th>
                   <th className="px-5 py-3 font-medium">Removed</th>
+                  <th className="px-5 py-3 font-medium">Activity vs. own baseline</th>
+                  <th className="px-5 py-3 font-medium">Repeated price changes</th>
                   <th className="px-5 py-3 font-medium">Most recent change</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rows.map((row) => (
-                  <tr key={row.competitorId}>
-                    <td className="px-5 py-3">
-                      <Link href={`/competitors/${row.competitorId}`} className="font-medium text-indigo-600 hover:text-indigo-700">
-                        {row.name}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-3">
-                      <p className="font-medium text-slate-900">{row.totalChanges.current}</p>
-                      <p className="text-xs text-slate-400">{formatPeriodDeltaLabel(row.totalChanges)}</p>
-                    </td>
-                    <td className="px-5 py-3 text-slate-700">{row.priceChanges.current}</td>
-                    <td className="px-5 py-3 text-slate-700">{row.productsAdded.current}</td>
-                    <td className="px-5 py-3 text-slate-700">{row.productsRemoved.current}</td>
-                    <td className="px-5 py-3 text-slate-500">{row.latestChangeAt ? formatDateTime(row.latestChangeAt) : "—"}</td>
-                  </tr>
-                ))}
+                {rows.map((row) => {
+                  const { label, tone } = activityDirectionLabel(row.activityPattern);
+                  return (
+                    <tr key={row.competitorId} data-testid="compare-row">
+                      <td className="px-5 py-3">
+                        <Link href={`/competitors/${row.competitorId}`} className="font-medium text-indigo-600 hover:text-indigo-700">
+                          {row.name}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-3">
+                        <p className="font-medium text-slate-900">{row.totalChanges.current}</p>
+                        <p className="text-xs text-slate-400">{formatPeriodDeltaLabel(row.totalChanges)}</p>
+                      </td>
+                      <td className="px-5 py-3 text-slate-700">{row.priceChanges.current}</td>
+                      <td className="px-5 py-3 text-slate-700">{row.productsAdded.current}</td>
+                      <td className="px-5 py-3 text-slate-700">{row.productsRemoved.current}</td>
+                      <td className="px-5 py-3">
+                        <Badge tone={tone} data-testid="compare-pattern-badge">
+                          {label}
+                        </Badge>
+                        {row.activityPattern.qualifies ? (
+                          <p className="mt-1 max-w-xs text-xs text-slate-400" data-testid="compare-pattern-detail">
+                            {activityDetailText(row.activityPattern)}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="px-5 py-3 text-slate-700" data-testid="compare-repeated-price-count">
+                        {row.qualifyingRepeatedPriceChangeCount > 0
+                          ? `${row.qualifyingRepeatedPriceChangeCount} product${row.qualifyingRepeatedPriceChangeCount === 1 ? "" : "s"}/plan${row.qualifyingRepeatedPriceChangeCount === 1 ? "" : "s"}`
+                          : "None"}
+                      </td>
+                      <td className="px-5 py-3 text-slate-500">
+                        {row.latestChangeEventId ? (
+                          <Link href={`/changes/${row.latestChangeEventId}`} className="text-indigo-600 hover:text-indigo-700" data-testid="compare-latest-change-link">
+                            {row.latestChangeAt ? formatDateTime(row.latestChangeAt) : "View evidence"}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </CardContent>
+          <p className="px-5 py-4 text-xs text-slate-400">
+            &quot;Activity vs. own baseline&quot; compares each competitor only against its own accumulated history -
+            never against another competitor or a market average. &quot;Not enough history yet&quot; means this
+            competitor&apos;s own baseline cannot be established yet, not that it has no activity.
+          </p>
         </Card>
       )}
     </div>

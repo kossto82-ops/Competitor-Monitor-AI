@@ -5,12 +5,15 @@ import { createCompetitor } from "./competitors.js";
 import { createMonitoredUrl } from "./monitoredUrls.js";
 import {
   compareCompetitors,
+  getCompetitiveContext,
   getCompetitorActivityMetrics,
   getOrgActivityMetrics,
   getPriceHistoryForCompetitor,
   getProductLifecycleSummary,
 } from "./intelligence.js";
 import type { ChangeType } from "../../generated/client/index.js";
+
+const DAY = 24 * 60 * 60 * 1000;
 
 /**
  * Phase 6: same real-Postgres, skip-if-unreachable convention as
@@ -331,6 +334,188 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       const result = await compareCompetitors(orgB.id, [compA.id, compB.id], 30);
       expect(result).toHaveLength(1);
       expect(result[0]?.competitorId).toBe(compB.id);
+    });
+  });
+
+  describe("getCompetitiveContext (Phase 8)", () => {
+    async function makeCompetitor(orgId: string, name: string, createdAt?: Date) {
+      const competitor = await createCompetitor(orgId, { name });
+      if (createdAt) {
+        await prisma.competitor.update({ where: { id: competitor.id }, data: { createdAt } });
+      }
+      return competitor;
+    }
+
+    it("returns an empty array for an empty competitorIds list", async () => {
+      const org = await makeOrg("ContextEmpty");
+      const result = await getCompetitiveContext(org.id, [], 30);
+      expect(result).toEqual([]);
+    });
+
+    it("returns one row per competitor (one, two, and multiple competitors), each carrying compareCompetitors' base fields plus the pattern extension", async () => {
+      const org = await makeOrg("ContextMulti");
+      const compA = await makeCompetitor(org.id, "Ctx A");
+      const compB = await makeCompetitor(org.id, "Ctx B");
+      const compC = await makeCompetitor(org.id, "Ctx C");
+      const urlA = await createMonitoredUrl(org.id, compA.id, { url: "https://ctx-a.example.test", category: "GENERAL" });
+      await createMonitoredUrl(org.id, compB.id, { url: "https://ctx-b.example.test", category: "GENERAL" });
+      await createMonitoredUrl(org.id, compC.id, { url: "https://ctx-c.example.test", category: "GENERAL" });
+      await createChangeEvent(org.id, urlA.id, { changeType: "PRICE_CHANGE" });
+
+      const oneResult = await getCompetitiveContext(org.id, [compA.id], 30);
+      expect(oneResult).toHaveLength(1);
+
+      const twoResult = await getCompetitiveContext(org.id, [compA.id, compB.id], 30);
+      expect(twoResult).toHaveLength(2);
+
+      const allResult = await getCompetitiveContext(org.id, [compA.id, compB.id, compC.id], 30);
+      expect(allResult).toHaveLength(3);
+      for (const row of allResult) {
+        expect(row).toHaveProperty("activityPattern");
+        expect(row).toHaveProperty("qualifyingRepeatedPriceChangeCount");
+        expect(row).toHaveProperty("latestChangeEventId");
+      }
+      // Order matches the caller's own competitorIds order - no ranking/reordering imposed.
+      expect(allResult.map((r) => r.competitorId)).toEqual([compA.id, compB.id, compC.id]);
+    });
+
+    it("reports different history ages honestly: a fresh competitor is INSUFFICIENT_HISTORY, a long-tracked one qualifies - neither is hidden", async () => {
+      const org = await makeOrg("ContextHistoryAges");
+      const fresh = await makeCompetitor(org.id, "Fresh Co"); // default createdAt (today)
+      const established = await makeCompetitor(org.id, "Established Co", new Date(Date.now() - 150 * DAY));
+      const freshUrl = await createMonitoredUrl(org.id, fresh.id, { url: "https://fresh.example.test", category: "GENERAL" });
+      const establishedUrl = await createMonitoredUrl(org.id, established.id, { url: "https://established.example.test", category: "GENERAL" });
+
+      await createChangeEvent(org.id, freshUrl.id, { detectedAt: new Date(Date.now() - 5 * DAY) });
+
+      // Established: 1/window baseline (3 historical windows), current = 4 -> ABOVE_BASELINE, qualifies.
+      for (const daysAgo of [45, 75, 105]) {
+        await createChangeEvent(org.id, establishedUrl.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `baseline-${daysAgo}` });
+      }
+      for (const daysAgo of [1, 5, 10, 20]) {
+        await createChangeEvent(org.id, establishedUrl.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `current-${daysAgo}` });
+      }
+
+      const result = await getCompetitiveContext(org.id, [fresh.id, established.id], 30);
+      const byId = new Map(result.map((r) => [r.competitorId, r]));
+
+      const freshRow = byId.get(fresh.id);
+      expect(freshRow?.activityPattern.qualifies).toBe(false);
+      expect(freshRow?.activityPattern.direction).toBe("INSUFFICIENT_HISTORY");
+      // Insufficient history must remain VISIBLE with its true (non-zero-in-current-window) data, never silently dropped.
+      expect(freshRow).toBeDefined();
+
+      const establishedRow = byId.get(established.id);
+      expect(establishedRow?.activityPattern.qualifies).toBe(true);
+      expect(establishedRow?.activityPattern.direction).toBe("ABOVE_BASELINE");
+      expect(establishedRow?.activityPattern.qualifyingWindows).toBe(3);
+    });
+
+    it("exposes all four ActivityPattern direction states across different competitors, using getActivityPattern verbatim (no re-derived formula)", async () => {
+      const org = await makeOrg("ContextDirections");
+      const insufficient = await makeCompetitor(org.id, "Insufficient Co");
+      const above = await makeCompetitor(org.id, "Above Co", new Date(Date.now() - 150 * DAY));
+      const at = await makeCompetitor(org.id, "At Co", new Date(Date.now() - 150 * DAY));
+      const below = await makeCompetitor(org.id, "Below Co", new Date(Date.now() - 150 * DAY));
+
+      const insufficientUrl = await createMonitoredUrl(org.id, insufficient.id, { url: "https://insuff.example.test", category: "GENERAL" });
+      const aboveUrl = await createMonitoredUrl(org.id, above.id, { url: "https://above.example.test", category: "GENERAL" });
+      const atUrl = await createMonitoredUrl(org.id, at.id, { url: "https://at.example.test", category: "GENERAL" });
+      const belowUrl = await createMonitoredUrl(org.id, below.id, { url: "https://below.example.test", category: "GENERAL" });
+
+      await createChangeEvent(org.id, insufficientUrl.id, { detectedAt: new Date(Date.now() - 2 * DAY) });
+
+      // above: baseline 1/window, current 4 -> ratio 4.0 >= 1.5
+      for (const daysAgo of [45, 75, 105]) await createChangeEvent(org.id, aboveUrl.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `a-${daysAgo}` });
+      for (const daysAgo of [1, 5, 10, 20]) await createChangeEvent(org.id, aboveUrl.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `ac-${daysAgo}` });
+
+      // at: baseline 2/window, current 2 -> ratio 1.0
+      for (const daysAgo of [40, 50, 70, 80, 100, 110]) await createChangeEvent(org.id, atUrl.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `t-${daysAgo}` });
+      for (const daysAgo of [3, 10]) await createChangeEvent(org.id, atUrl.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `tc-${daysAgo}` });
+
+      // below: baseline 4/window, current 0 -> ratio 0
+      for (const daysAgo of [32, 35, 38, 41, 62, 65, 68, 71, 92, 95, 98, 101]) {
+        await createChangeEvent(org.id, belowUrl.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `b-${daysAgo}` });
+      }
+
+      const result = await getCompetitiveContext(org.id, [insufficient.id, above.id, at.id, below.id], 30);
+      const byId = new Map(result.map((r) => [r.competitorId, r]));
+
+      expect(byId.get(insufficient.id)?.activityPattern.direction).toBe("INSUFFICIENT_HISTORY");
+      expect(byId.get(above.id)?.activityPattern.direction).toBe("ABOVE_BASELINE");
+      expect(byId.get(at.id)?.activityPattern.direction).toBe("AT_BASELINE");
+      expect(byId.get(below.id)?.activityPattern.direction).toBe("BELOW_BASELINE");
+    });
+
+    it("counts only QUALIFYING repeated price-change entities (>= 2 changes), never a single change treated as repeated", async () => {
+      const org = await makeOrg("ContextRepeated");
+      const comp = await makeCompetitor(org.id, "Repeat Co");
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://repeat.example.test", category: "GENERAL" });
+
+      await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "solo-plan" }); // only 1 - must not count
+      await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "repeat-plan" });
+      await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "repeat-plan" });
+
+      const [row] = await getCompetitiveContext(org.id, [comp.id], 30);
+      expect(row?.qualifyingRepeatedPriceChangeCount).toBe(1);
+    });
+
+    it("exposes the latest ChangeEvent's id (evidence traceability), matching compareCompetitors' own latestChangeAt date", async () => {
+      const org = await makeOrg("ContextEvidence");
+      const comp = await makeCompetitor(org.id, "Evidence Co");
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://evidence.example.test", category: "GENERAL" });
+
+      await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - 10 * DAY) });
+      const latest = await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - 1 * DAY) });
+
+      const [row] = await getCompetitiveContext(org.id, [comp.id], 30);
+      expect(row?.latestChangeEventId).toBe(latest.id);
+      expect(row?.latestChangeAt?.getTime()).toBe(latest.detectedAt.getTime());
+    });
+
+    it("returns null latestChangeEventId (not a crash, not a fabricated id) when a competitor has no ChangeEvents at all", async () => {
+      const org = await makeOrg("ContextNoEvents");
+      const comp = await makeCompetitor(org.id, "No Events Co");
+      await createMonitoredUrl(org.id, comp.id, { url: "https://noevents.example.test", category: "GENERAL" });
+
+      const [row] = await getCompetitiveContext(org.id, [comp.id], 30);
+      expect(row?.latestChangeEventId).toBeNull();
+      expect(row?.latestChangeAt).toBeNull();
+      expect(row?.activityPattern.direction).toBe("INSUFFICIENT_HISTORY");
+      expect(row?.qualifyingRepeatedPriceChangeCount).toBe(0);
+    });
+
+    it("silently drops a competitorId that does not belong to the organization - no cross-tenant pattern/repeated-price leak", async () => {
+      const orgA = await makeOrg("ContextXTenantA");
+      const orgB = await makeOrg("ContextXTenantB");
+      const compA = await makeCompetitor(orgA.id, "A only", new Date(Date.now() - 150 * DAY));
+      const compB = await makeCompetitor(orgB.id, "B's own");
+      const urlA = await createMonitoredUrl(orgA.id, compA.id, { url: "https://xtenant-a.example.test", category: "GENERAL" });
+
+      // Heavy above-baseline activity in Org A - must never surface for Org B, even when Org B's
+      // request includes Org A's competitorId.
+      for (const daysAgo of [1, 2, 3, 4, 5, 6, 7, 8]) {
+        await createChangeEvent(orgA.id, urlA.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `xt-${daysAgo}` });
+      }
+
+      const result = await getCompetitiveContext(orgB.id, [compA.id, compB.id], 30);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.competitorId).toBe(compB.id);
+    });
+
+    it("issues a query count bounded by the number of SELECTED competitors, not by event volume per competitor", async () => {
+      const org = await makeOrg("ContextQueryBound");
+      const comp = await makeCompetitor(org.id, "QC Co");
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://qc-ctx.example.test", category: "GENERAL" });
+      for (let i = 0; i < 15; i += 1) {
+        await createChangeEvent(org.id, url.id, { entityKey: `plan-${i}` });
+      }
+
+      const queryCount = await countPrismaQueries(() => getCompetitiveContext(org.id, [comp.id], 30));
+      // Bounded: compareCompetitors (competitor lookup + per-competitor activity+latest) plus
+      // getActivityPattern + getRepeatedPriceChangePatterns + the new latest-event-with-id lookup,
+      // all for exactly 1 competitor - not proportional to the 15 ChangeEvents created above.
+      expect(queryCount).toBeLessThanOrEqual(16);
     });
   });
 });
