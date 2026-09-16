@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { ArrowLeft, Link2 } from "lucide-react";
 import {
+  getActivityPattern,
   getCompetitorActivityMetrics,
   getCompetitorForOrg,
   getOrganizationById,
   getPriceHistoryForCompetitor,
   getProductLifecycleSummary,
+  getRepeatedPriceChangePatterns,
   listChangeEventsForCompetitor,
   listMonitoredUrlsWithStatusForOrg,
 } from "@cma/db";
@@ -19,6 +21,7 @@ import { CompetitorActions } from "@/components/app/CompetitorActions";
 import { MonitoredUrlActions } from "@/components/app/MonitoredUrlActions";
 import { ActivityMetricsCard } from "@/components/app/ActivityMetricsCard";
 import { PriceHistoryCard } from "@/components/app/PriceHistoryCard";
+import { PatternsCard } from "@/components/app/PatternsCard";
 import { changeTypeDisplay, jobStatusDisplay, summarizeChangeEvent, verificationStateDisplay } from "@/lib/statusDisplay";
 import { formatPeriodDeltaLabel } from "@/lib/periodDisplay";
 import { formatRelativeTime } from "@/lib/formatTime";
@@ -174,13 +177,16 @@ export default async function CompetitorDetailPage({ params, searchParams }: Pag
     getOrganizationById(session.organizationId),
   ]);
   const timezone = organization?.timezone;
-  const [monitoredUrls, changeEvents, activityMetrics, lifecycleSummary, priceHistory] = await Promise.all([
-    listMonitoredUrlsWithStatusForOrg(session.organizationId, competitorId),
-    listChangeEventsForCompetitor(session.organizationId, competitorId),
-    getCompetitorActivityMetrics(session.organizationId, competitorId, days, timezone),
-    getProductLifecycleSummary(session.organizationId, competitorId, days, timezone),
-    getPriceHistoryForCompetitor(session.organizationId, competitorId),
-  ]);
+  const [monitoredUrls, changeEvents, activityMetrics, lifecycleSummary, priceHistory, activityPattern, repeatedPriceChangePatterns] =
+    await Promise.all([
+      listMonitoredUrlsWithStatusForOrg(session.organizationId, competitorId),
+      listChangeEventsForCompetitor(session.organizationId, competitorId),
+      getCompetitorActivityMetrics(session.organizationId, competitorId, days, timezone),
+      getProductLifecycleSummary(session.organizationId, competitorId, days, timezone),
+      getPriceHistoryForCompetitor(session.organizationId, competitorId),
+      getActivityPattern(session.organizationId, competitorId, days),
+      getRepeatedPriceChangePatterns(session.organizationId, competitorId, days),
+    ]);
 
   return (
     <div className="space-y-6">
@@ -214,6 +220,8 @@ export default async function CompetitorDetailPage({ params, searchParams }: Pag
         <ProductLifecycleCard summary={lifecycleSummary} />
         <PriceHistoryCard series={priceHistory} />
       </div>
+
+      <PatternsCard activityPattern={activityPattern} repeatedPriceChangePatterns={repeatedPriceChangePatterns} />
 
       {monitoredUrls.length === 0 ? (
         <Card>
