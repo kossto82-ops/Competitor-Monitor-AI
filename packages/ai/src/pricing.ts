@@ -33,12 +33,13 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 
 /**
  * Returns null (never a guess) when the configured provider/model has
- * no entry above. This is the expected outcome for
- * `CMA_AI_MODEL=gpt-5.6-luna` (this project's Phase 3 default) and for
- * any `openai-compatible` connection - no published per-token pricing
- * exists for a customer-chosen model, so `costUsd` stays null on every
- * completed analysis until a real price is known and added to
- * MODEL_PRICING.
+ * no entry above. This is the expected outcome for any model without a
+ * published entry (e.g. a smoke-test model like `gpt-5.6-luna`, which is
+ * NOT a product default - see resolveAiProvider.ts and Section 24's
+ * default-model audit) and for any `openai-compatible` connection - no
+ * published per-token pricing exists for a customer-chosen model, so
+ * `costUsd` stays null on every completed analysis until a real price is
+ * known and added to MODEL_PRICING.
  */
 export function calculateCostUsd(
   provider: string,

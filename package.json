@@ -13,6 +13,7 @@
     "db:generate": "npm run generate --workspace packages/db",
     "db:migrate": "npm run migrate:dev --workspace packages/db",
     "worker:enqueue": "npm run enqueue --workspace apps/worker",
+    "worker:enqueue-reports": "npm run enqueue:reports --workspace apps/worker",
     "worker:start": "npm run start --workspace apps/worker"
   },
   "devDependencies": {

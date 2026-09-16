@@ -36,3 +36,7 @@ export type EntityType = (typeof ENTITY_TYPES)[number];
 
 export const PLANS = ["STARTER", "PRO", "BUSINESS"] as const;
 export type Plan = (typeof PLANS)[number];
+
+/** Phase 4: lifecycle of a DailyReport (`Report` model) - mirrors JobStatus's shape. */
+export const REPORT_STATUSES = ["GENERATING", "COMPLETED", "FAILED"] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];

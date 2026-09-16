@@ -1,18 +1,85 @@
 import Link from "next/link";
-import { Building2, GitCompareArrows, Link2, ScanLine } from "lucide-react";
-import { getDashboardSummaryForOrg } from "@cma/db";
+import { Building2, FileText, GitCompareArrows, Link2, ScanLine } from "lucide-react";
+import { getDashboardSummaryForOrg, getLatestReportForOrg } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { jobStatusDisplay, severityDisplay, summarizeChangeEvent } from "@/lib/statusDisplay";
+import { jobStatusDisplay, reportStatusDisplay, severityDisplay, summarizeChangeEvent } from "@/lib/statusDisplay";
 import { formatRelativeTime } from "@/lib/formatTime";
+
+function formatReportDate(reportDate: Date): string {
+  return new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(reportDate);
+}
+
+/**
+ * Section 12: read-only summary of the most recently generated report -
+ * NEVER generates one on the fly (Section 12: "must not run report
+ * generation synchronously in the HTTP request"). If none exists yet
+ * (no daily report job has run for this organization), an honest empty
+ * state points at the Reports history instead of fabricating a report.
+ */
+function TodaysReportCard({ report }: { report: Awaited<ReturnType<typeof getLatestReportForOrg>> }) {
+  if (!report) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Today&apos;s competitor update</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <EmptyState
+            icon={<FileText className="h-8 w-8" />}
+            title="No report yet"
+            description="Your first daily competitor report will appear here once monitoring has run."
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const status = reportStatusDisplay(report.status);
+
+  return (
+    <Card>
+      <CardHeader className="flex items-center justify-between">
+        <CardTitle>Today&apos;s competitor update</CardTitle>
+        <Badge tone={status.tone}>{status.label}</Badge>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-slate-400">{formatReportDate(report.reportDate)}</p>
+        <div className="mt-3 grid grid-cols-3 gap-3 text-center">
+          <div>
+            <p className="text-xl font-semibold text-slate-900">{report.competitorCount}</p>
+            <p className="text-xs text-slate-400">monitored</p>
+          </div>
+          <div>
+            <p className="text-xl font-semibold text-slate-900">{report.competitorsWithChangesCount}</p>
+            <p className="text-xs text-slate-400">changed</p>
+          </div>
+          <div>
+            <p className="text-xl font-semibold text-slate-900">{report.changeCount}</p>
+            <p className="text-xs text-slate-400">changes</p>
+          </div>
+        </div>
+        <Link
+          href={`/reports/${report.id}`}
+          className="mt-4 inline-flex items-center text-xs font-medium text-indigo-600 hover:text-indigo-700"
+        >
+          View full report →
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default async function DashboardPage() {
   const session = await getSession();
   if (!session) return null; // layout already redirects; keeps TS happy
 
-  const summary = await getDashboardSummaryForOrg(session.organizationId);
+  const [summary, latestReport] = await Promise.all([
+    getDashboardSummaryForOrg(session.organizationId),
+    getLatestReportForOrg(session.organizationId),
+  ]);
 
   const stats = [
     { key: "competitors", label: "Competitors", value: summary.totalCompetitors, icon: Building2 },
@@ -43,6 +110,8 @@ export default async function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      <TodaysReportCard report={latestReport} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>

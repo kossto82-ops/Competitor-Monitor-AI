@@ -91,13 +91,27 @@ npm run --workspace apps/web dev      # Next.js API, http://localhost:3000
 npm run --workspace apps/worker dev   # BullMQ worker (processes monitoring jobs)
 ```
 
-There is no scheduler yet (Phase 1 scope) — jobs only run when you enqueue them:
+There is no scheduler yet for monitoring jobs (Phase 1 scope) — they only run when you enqueue them:
 
 ```bash
 npm run worker:enqueue                       # enqueue every active MonitoredUrl
 # or trigger one via the API:
 curl -X POST http://localhost:3000/api/monitored-urls/<urlId>/scan -b cookies.txt
 ```
+
+**Daily reports (Phase 4):** same "minimum scheduling" scope — one script, run once a day (a
+plain OS cron entry or a K8s CronJob in production), enqueues one `daily-report-jobs` job per
+organization with `dailyReportEnabled=true`, for "today" **in that organization's own
+`timezone`** (see `packages/core/src/reportWindow.ts`):
+
+```bash
+npm run worker:enqueue-reports
+```
+
+The report worker (part of `apps/worker`'s single process, alongside the monitoring and AI-analysis
+workers) picks the job up, aggregates already-persisted `ChangeEvent`s into a `Report` +
+`ReportItem` rows (never re-crawls, never re-runs AI), and attempts to email the organization's
+owner via `@cma/notifications` (console-only provider in this phase — see PHASE4-VALIDATION.md).
 
 ## 5. Build
 
@@ -174,7 +188,9 @@ CMA_AI_ENCRYPTION_KEY="<any long random string - generate with: openssl rand -he
 # Real provider (costs money, calls the actual OpenAI API):
 OPENAI_API_KEY="sk-..."
 CMA_AI_PROVIDER=openai          # default; explicit for clarity
-# Optional: CMA_AI_MODEL="gpt-5.6-luna" (default shown - configurable, never hard-coded)
+CMA_AI_MODEL="gpt-4o-mini"      # REQUIRED for this bootstrap path - there is no hard-coded
+                                 # default model anywhere in the codebase (Phase 4, Section 24).
+                                 # Pick whatever model your OPENAI_API_KEY is entitled to call.
 
 # Fake provider (local dev / E2E / CI — deterministic, free, no network call):
 NODE_ENV=development

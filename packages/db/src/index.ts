@@ -9,7 +9,7 @@ export * from "./repositories/snapshots.js";
 export * from "./repositories/monitoringPipeline.js";
 export * from "./repositories/changeEvents.js";
 export * from "./repositories/usage.js";
-export * from "./repositories/reports.js";
+export * from "./repositories/dailyReports.js";
 export * from "./repositories/dashboard.js";
 export * from "./repositories/aiAnalysis.js";
 export * from "./repositories/aiConnections.js";

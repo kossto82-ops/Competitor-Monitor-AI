@@ -13,3 +13,11 @@ export {
   createAiAnalysisWorker,
   type AiAnalysisJobPayload,
 } from "./aiAnalysisQueue.js";
+
+export {
+  DAILY_REPORT_QUEUE_NAME,
+  createDailyReportQueue,
+  createDailyReportWorker,
+  dailyReportJobId,
+  type DailyReportJobPayload,
+} from "./dailyReportQueue.js";

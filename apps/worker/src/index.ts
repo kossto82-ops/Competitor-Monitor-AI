@@ -1,8 +1,23 @@
-import { createMonitoringWorker, createAiAnalysisWorker, type MonitoringJobPayload, type AiAnalysisJobPayload } from "@cma/queue";
-import { getMonitoringJobForOrg, markMonitoringJobFailed, getAiAnalysisForOrg, markAiAnalysisFailed } from "@cma/db";
+import {
+  createMonitoringWorker,
+  createAiAnalysisWorker,
+  createDailyReportWorker,
+  type MonitoringJobPayload,
+  type AiAnalysisJobPayload,
+  type DailyReportJobPayload,
+} from "@cma/queue";
+import {
+  getMonitoringJobForOrg,
+  markMonitoringJobFailed,
+  getAiAnalysisForOrg,
+  markAiAnalysisFailed,
+  markReportFailed,
+  getOrCreateReportPeriod,
+} from "@cma/db";
 import type { Job } from "bullmq";
 import { runMonitoringJob } from "./pipeline.js";
 import { runAiAnalysisJob } from "./aiPipeline.js";
+import { generateDailyReportJob } from "./reportPipeline.js";
 
 const worker = createMonitoringWorker(async (job: Job<MonitoringJobPayload>) => {
   const result = await runMonitoringJob(job.data);
@@ -78,10 +93,52 @@ aiWorker.on("failed", (job, err) => {
     });
 });
 
+const reportWorker = createDailyReportWorker(async (job: Job<DailyReportJobPayload>) => {
+  const result = await generateDailyReportJob(job.data);
+  console.log(
+    `[report-worker] job=${job.id} organizationId=${job.data.organizationId} reportDate=${job.data.reportDate} ` +
+      `status=${result.status} changes=${result.changeCount} email=${result.emailOutcome}`,
+  );
+  return result;
+});
+
+/**
+ * Same defense-in-depth as the other two workers' 'failed' handlers: a
+ * worker crash mid-job or a BullMQ stalled-job timeout can reach here
+ * without generateDailyReportJob's own try/catch (in
+ * reportPipeline.ts's ensureReportGenerated) ever running, which would
+ * otherwise leave the Report row stuck GENERATING forever - the
+ * dashboard/history views would then show a report that never finishes.
+ * Deliberately reads the Report's CURRENT status first rather than
+ * blindly marking it FAILED - it may have already reached COMPLETED (the
+ * generation step succeeded and only the email step, or the event-loop
+ * teardown itself, is what crashed).
+ */
+reportWorker.on("failed", (job, err) => {
+  console.error(`[report-worker] job=${job?.id} FAILED:`, err.message);
+
+  const organizationId = job?.data?.organizationId;
+  const reportDate = job?.data?.reportDate;
+  const timezone = job?.data?.timezone;
+  if (!organizationId || !reportDate || !timezone) return;
+
+  getOrCreateReportPeriod(organizationId, reportDate, timezone)
+    .then((current) => {
+      if (current.status !== "COMPLETED" && current.status !== "FAILED") {
+        return markReportFailed(current.id, err.message);
+      }
+      return undefined;
+    })
+    .catch((markErr: unknown) => {
+      console.error(`[report-worker] failed to mark report FAILED after job failure (org=${organizationId}):`, markErr);
+    });
+});
+
 console.log("[worker] listening for monitoring jobs...");
 console.log("[ai-worker] listening for AI analysis jobs...");
+console.log("[report-worker] listening for daily report jobs...");
 
 process.on("SIGTERM", async () => {
-  await Promise.all([worker.close(), aiWorker.close()]);
+  await Promise.all([worker.close(), aiWorker.close(), reportWorker.close()]);
   process.exit(0);
 });

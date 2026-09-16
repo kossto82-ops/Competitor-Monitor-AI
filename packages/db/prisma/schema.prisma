@@ -96,8 +96,28 @@ enum NotificationChannel {
   EMAIL
 }
 
+// Phase 4: PENDING is the reserve-then-resolve idempotency anchor,
+// exactly mirroring AiAnalysisStatus's PENDING row created before any
+// external call is attempted (see getOrCreatePendingAiAnalysis) - a
+// worker crash between reserving this row and actually sending the
+// email leaves it correctly recoverable (retry re-sends) rather than
+// permanently stuck, since only SENT is ever treated as "done, do not
+// resend" (see recordReportEmailResult).
 enum NotificationStatus {
+  PENDING
   SENT
+  FAILED
+}
+
+// Phase 4: mirrors JobStatus/AiAnalysisStatus's lifecycle shape -
+// GENERATING is the "currently being built" state a queue job holds a
+// report in between creating it (idempotency anchor) and finishing
+// aggregation; a crashed/retried job re-enters this same function and
+// finds the row already GENERATING/COMPLETED rather than creating a
+// second one. See packages/db/src/repositories/reports.ts.
+enum ReportStatus {
+  GENERATING
+  COMPLETED
   FAILED
 }
 
@@ -109,6 +129,16 @@ model Organization {
   id        String   @id @default(cuid())
   name      String
   plan      Plan     @default(STARTER)
+  // Phase 4 (Section 3): the IANA timezone used to compute this
+  // organization's "calendar day" reporting window - e.g. "Europe/Berlin".
+  // Defaults to "UTC" so a customer who never sets one gets a well-defined,
+  // documented boundary rather than an ambiguous mix of server-local and
+  // UTC times (see packages/core/src/reportWindow.ts).
+  timezone  String   @default("UTC")
+  // Phase 4: whether the scheduler should enqueue a daily report job for
+  // this organization at all. Deliberately a single boolean, not a cron
+  // expression - Section 11 asks for the minimum scheduling necessary.
+  dailyReportEnabled Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -281,7 +311,8 @@ model ChangeEvent {
   evidenceExcerpt  String
   detectedAt       DateTime   @default(now())
 
-  aiAnalysis AiAnalysis?
+  aiAnalysis  AiAnalysis?
+  reportItems ReportItem[]
 
   @@index([organizationId])
   @@index([monitoredUrlId, detectedAt])
@@ -379,26 +410,74 @@ model AiConnection {
   @@map("ai_connections")
 }
 
+// Phase 4: one row per organization per reporting period (Section 4).
+// `reportDate` is stored as a bare UTC midnight DATE-like timestamp
+// representing "which calendar day this report covers", NOT the window's
+// actual UTC instants - see packages/core/src/reportWindow.ts for how the
+// organization's own timezone turns that date into concrete
+// [startUtc, endUtc) bounds used to select ChangeEvents. `timezone` is
+// persisted alongside it (not just read from Organization at generation
+// time) so a report's period identity is stable even if the organization
+// later changes its timezone setting.
+//
+// The `@@unique` below is the idempotency anchor (Section 4/9): a queue
+// job retried after a crash, or two near-simultaneous scheduler ticks,
+// resolve to the SAME row via upsert rather than creating a duplicate
+// report for the same organization/day/timezone.
 model Report {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  reportDate          DateTime
-  generatedAt         DateTime @default(now())
-  competitorsChecked  Int
-  urlsChecked         Int
-  successfulScans     Int
-  failedScans         Int
-  highSeverityCount   Int
-  mediumSeverityCount Int
-  lowSeverityCount    Int
-  noChangeCount       Int
+  reportDate DateTime
+  timezone   String
+  status     ReportStatus @default(GENERATING)
 
+  // Denormalized summary counts (Section 1) - computed once at generation
+  // time from the ReportItems below, so the dashboard/history list never
+  // has to re-aggregate on every render.
+  competitorCount             Int @default(0)
+  competitorsWithChangesCount Int @default(0)
+  changeCount                 Int @default(0)
+
+  errorMessage String?
+  generatedAt  DateTime? // set only once status becomes COMPLETED
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  items         ReportItem[]
   notifications NotificationLog[]
 
-  @@unique([organizationId, reportDate])
+  @@unique([organizationId, reportDate, timezone])
+  @@index([organizationId, reportDate])
   @@map("reports")
+}
+
+// Phase 4 (Section 5): a thin join between a DailyReport and the
+// deterministic ChangeEvent it surfaces - deliberately NOT a copy of the
+// ChangeEvent's fields (Section 5: "prefer references/relations"). Any
+// AI interpretation is read through `changeEvent.aiAnalysis` at query
+// time, never duplicated here either, so there is exactly one source of
+// truth for both the deterministic fact and its optional AI enrichment.
+//
+// `@@unique([reportId, changeEventId])` makes report generation
+// idempotent at the item level: re-running generateDailyReport for a
+// report that already has this ChangeEvent is a no-op for that item, not
+// a duplicate row.
+model ReportItem {
+  id             String      @id @default(cuid())
+  organizationId String
+  reportId       String
+  report         Report      @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  changeEventId  String
+  changeEvent    ChangeEvent @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([reportId, changeEventId])
+  @@index([organizationId])
+  @@index([reportId])
+  @@map("report_items")
 }
 
 model NotificationLog {
@@ -414,6 +493,15 @@ model NotificationLog {
   errorMessage String?
   createdAt    DateTime            @default(now())
 
+  // Phase 4 (Section 16/17): the idempotency key for report email
+  // delivery - "organization + report + channel + recipient" (reportId
+  // already carries the organization, but organizationId stays on this
+  // row like every other tenant table per the schema-header convention).
+  // A retried "send the daily report email" job resolves to the SAME row
+  // via upsert instead of sending a second email. Nullable `reportId`
+  // means this constraint only applies to report-related notifications;
+  // any future non-report notification channel is unaffected.
+  @@unique([reportId, channel, recipient])
   @@index([organizationId])
   @@map("notification_logs")
 }

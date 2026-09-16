@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Building2, GitCompareArrows, Settings, Sparkles } from "lucide-react";
+import { LayoutDashboard, Building2, GitCompareArrows, FileText, Settings, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/competitors", label: "Competitors", icon: Building2, section: "Monitoring" },
   { href: "/changes", label: "Changes", icon: GitCompareArrows },
+  { href: "/reports", label: "Reports", icon: FileText },
   { href: "/settings/account", label: "Account", icon: Settings, section: "Settings" },
   { href: "/settings/ai", label: "AI Provider", icon: Sparkles },
 ];

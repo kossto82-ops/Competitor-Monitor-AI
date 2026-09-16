@@ -9,7 +9,8 @@ import {
 } from "./repositories/monitoredUrls.js";
 import { listChangeEventsForOrg } from "./repositories/changeEvents.js";
 import { getSnapshotForOrg } from "./repositories/snapshots.js";
-import { getReportForOrg, getAiAnalysisForOrg } from "./repositories/reports.js";
+import { getAiAnalysisForOrg } from "./repositories/aiAnalysis.js";
+import { getReportForOrg, getReportWithItemsForOrg, listReportsForOrg } from "./repositories/dailyReports.js";
 import { NotFoundError } from "./repositories/errors.js";
 
 /**
@@ -98,18 +99,19 @@ describe.skipIf(!reachable)("tenant isolation", () => {
     const report = await prisma.report.create({
       data: {
         organizationId: tenant.organization.id,
-        reportDate: new Date(),
-        competitorsChecked: 1,
-        urlsChecked: 1,
-        successfulScans: 1,
-        failedScans: 0,
-        highSeverityCount: 0,
-        mediumSeverityCount: 0,
-        lowSeverityCount: 1,
-        noChangeCount: 0,
+        reportDate: new Date("2026-09-16T00:00:00.000Z"),
+        timezone: "UTC",
+        status: "COMPLETED",
+        competitorCount: 1,
+        competitorsWithChangesCount: 1,
+        changeCount: 1,
+        generatedAt: new Date(),
       },
     });
-    return { ...tenant, job, snapshot, changeEvent, aiAnalysis, report };
+    const reportItem = await prisma.reportItem.create({
+      data: { organizationId: tenant.organization.id, reportId: report.id, changeEventId: changeEvent.id },
+    });
+    return { ...tenant, job, snapshot, changeEvent, aiAnalysis, report, reportItem };
   }
 
   afterAll(async () => {
@@ -188,6 +190,28 @@ describe.skipIf(!reachable)("tenant isolation", () => {
 
     await expect(getAiAnalysisForOrg(b.organization.id, a.aiAnalysis.id)).rejects.toThrow(NotFoundError);
     await expect(getAiAnalysisForOrg(a.organization.id, a.aiAnalysis.id)).resolves.toMatchObject({ id: a.aiAnalysis.id });
+  });
+
+  it("Phase 4 (Section 22): org B cannot read org A's report, report items, or the ChangeEvent they reference", async () => {
+    const a = await makeTenantWithFullChain("A10");
+    const b = await makeTenantWithFullChain("B10");
+
+    // Detail lookup by id.
+    await expect(getReportForOrg(b.organization.id, a.report.id)).rejects.toThrow(NotFoundError);
+    await expect(getReportForOrg(a.organization.id, a.report.id)).resolves.toMatchObject({ id: a.report.id });
+
+    // Detail-with-items lookup - the report item AND its nested ChangeEvent must never leak.
+    await expect(getReportWithItemsForOrg(b.organization.id, a.report.id)).rejects.toThrow(NotFoundError);
+    const aWithItems = await getReportWithItemsForOrg(a.organization.id, a.report.id);
+    expect(aWithItems.items.map((i) => i.id)).toContain(a.reportItem.id);
+    expect(aWithItems.items.map((i) => i.changeEvent.id)).toContain(a.changeEvent.id);
+
+    // List views - org B's report history must never contain org A's report.
+    const aReports = await listReportsForOrg(a.organization.id);
+    const bReports = await listReportsForOrg(b.organization.id);
+    expect(aReports.map((r) => r.id)).toContain(a.report.id);
+    expect(aReports.map((r) => r.id)).not.toContain(b.report.id);
+    expect(bReports.map((r) => r.id)).not.toContain(a.report.id);
   });
 
   it("prevents org B from MODIFYING org A's competitor (organizationId-scoped update affects zero rows)", async () => {

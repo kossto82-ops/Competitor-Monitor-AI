@@ -1,3 +1,4 @@
+import { describeChangeEvent } from "@cma/core";
 import type { BadgeTone } from "@/components/ui/Badge";
 
 /**
@@ -52,6 +53,19 @@ export function aiConfidenceDisplay(confidence: string): { label: string; tone: 
   }
 }
 
+export function reportStatusDisplay(status: string): { label: string; tone: BadgeTone } {
+  switch (status) {
+    case "GENERATING":
+      return { label: "Generating…", tone: "blue" };
+    case "COMPLETED":
+      return { label: "Ready", tone: "green" };
+    case "FAILED":
+      return { label: "Failed", tone: "red" };
+    default:
+      return { label: status, tone: "gray" };
+  }
+}
+
 export function jobStatusDisplay(status: string): { label: string; tone: BadgeTone } {
   switch (status) {
     case "PENDING":
@@ -97,31 +111,11 @@ export function severityDisplay(severity: string): { label: string; tone: BadgeT
   }
 }
 
-/** One-line human summary for a change-feed row. */
-export function summarizeChangeEvent(event: {
-  changeType: string;
-  oldValue: string | null;
-  newValue: string | null;
-  currency: string | null;
-  percentageChange: number | null;
-}): string {
-  const { changeType, oldValue, newValue, currency, percentageChange } = event;
-  const money = (v: string | null) => (v === null ? "—" : `${currency ?? ""}${v}`.trim());
-
-  switch (changeType) {
-    case "PRICE_CHANGE": {
-      const pct = percentageChange !== null ? ` (${percentageChange > 0 ? "+" : ""}${percentageChange}%)` : "";
-      return `Price changed from ${money(oldValue)} to ${money(newValue)}${pct}`;
-    }
-    case "PRODUCT_ADDED":
-      return `New item detected: ${money(newValue)}`;
-    case "PRODUCT_REMOVED":
-      return `An item is no longer listed (was ${money(oldValue)})`;
-    case "PROMOTION_CHANGE":
-      return "A promotion changed";
-    case "CONTENT_CHANGE":
-      return "The page's visible text changed";
-    default:
-      return "A change was detected";
-  }
-}
+/**
+ * One-line human summary for a change-feed row. Delegates to
+ * `@cma/core`'s `describeChangeEvent` (Phase 4, Section 18/19) so the
+ * dashboard, change detail page, report pages, and the report email all
+ * describe the same deterministic fact with identical wording - never
+ * two slightly different sentences about the same ChangeEvent.
+ */
+export const summarizeChangeEvent = describeChangeEvent;

@@ -1,5 +1,23 @@
 import { Prisma } from "../../generated/client/index.js";
 import { prisma } from "../client.js";
+import { NotFoundError } from "./errors.js";
+
+/**
+ * Looks up an AiAnalysis by its own id. AiAnalysis carries a direct
+ * `organizationId` column (see the schema comment on that model) so this
+ * scopes the same way every other repository function does - a single
+ * `WHERE organizationId = ?`, not a join through ChangeEvent. (Moved here
+ * from the old reports.ts in Phase 4 - this repository is its natural
+ * home, reports.ts was renamed to dailyReports.ts for the new
+ * report-generation functions.)
+ */
+export async function getAiAnalysisForOrg(organizationId: string, aiAnalysisId: string) {
+  const analysis = await prisma.aiAnalysis.findFirst({
+    where: { id: aiAnalysisId, organizationId },
+  });
+  if (!analysis) throw new NotFoundError("AiAnalysis");
+  return analysis;
+}
 
 function isUniqueConstraintViolation(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";

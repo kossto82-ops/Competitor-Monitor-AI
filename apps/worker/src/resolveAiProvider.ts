@@ -2,15 +2,6 @@ import { createAiProvider, isAiProviderKind, UnsupportedAiProviderError, type Ai
 import { getEnabledAiConnectionConfigForOrg, type DecryptedAiConnectionConfig } from "@cma/db";
 
 /**
- * Section 3's configured production default when no per-organization
- * model override exists. Comes from CMA_AI_MODEL when set for the
- * dev/test fallback path (Section 16); an AiConnection's own `model`
- * always takes precedence (Section 15) - this constant is never
- * consulted once an organization has a real connection.
- */
-const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
-
-/**
  * Mirrors packages/security/src/resolveHost.ts's
  * privateTargetsAllowedForTesting() convention: an opt-in env flag that
  * is a no-op whenever NODE_ENV=production, so a misconfigured
@@ -35,11 +26,23 @@ function envOpenAiBootstrapAllowed(): boolean {
   return process.env["NODE_ENV"] !== "production" && process.env["CMA_AI_PROVIDER"] === "openai";
 }
 
+/**
+ * Phase 4 (Section 24 regression fix): there is NO hard-coded fallback
+ * model here anymore. Earlier code defaulted to a specific model
+ * ("gpt-5.6-luna") whenever CMA_AI_MODEL was unset - that is exactly the
+ * "hidden production default model" this phase's audit forbids. The
+ * dev-only bootstrap path now requires CMA_AI_MODEL to be explicitly set
+ * (see .env.example); if it is missing, bootstrap is simply unavailable
+ * and resolution falls through to NoAiProviderConfiguredError below,
+ * same as any other misconfiguration - it never silently substitutes a
+ * model nobody chose.
+ */
 function resolveEnvBootstrapConfig(): AiConnectionConfig | null {
   if (!envOpenAiBootstrapAllowed()) return null;
   const apiKey = process.env["OPENAI_API_KEY"];
-  if (!apiKey) return null;
-  return { provider: "openai", model: process.env["CMA_AI_MODEL"] ?? DEFAULT_OPENAI_MODEL, apiKey };
+  const model = process.env["CMA_AI_MODEL"];
+  if (!apiKey || !model) return null;
+  return { provider: "openai", model, apiKey };
 }
 
 /**

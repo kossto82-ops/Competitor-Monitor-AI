@@ -48,10 +48,22 @@ describe("resolveAiProviderForOrg (Section 4/17: precedence, never silently cros
     const deps: ResolveAiProviderDeps = { getEnabledAiConnectionConfigForOrg: vi.fn().mockResolvedValue(null) };
     process.env["CMA_AI_PROVIDER"] = "openai";
     process.env["OPENAI_API_KEY"] = "sk-dev-bootstrap";
+    process.env["CMA_AI_MODEL"] = "gpt-4o-mini";
 
     const { provider, config } = await resolveAiProviderForOrg("org-1", deps);
     expect(provider).toBeInstanceOf(OpenAiProvider);
-    expect(config.model).toBe("gpt-5.6-luna");
+    // The model comes ONLY from the explicitly-set CMA_AI_MODEL env var - never
+    // from any hard-coded constant (Section 24 regression test).
+    expect(config.model).toBe("gpt-4o-mini");
+  });
+
+  it("regression (Section 24): the dev bootstrap NEVER defaults to a hard-coded model when CMA_AI_MODEL is unset - it fails cleanly instead", async () => {
+    const deps: ResolveAiProviderDeps = { getEnabledAiConnectionConfigForOrg: vi.fn().mockResolvedValue(null) };
+    process.env["CMA_AI_PROVIDER"] = "openai";
+    process.env["OPENAI_API_KEY"] = "sk-dev-bootstrap";
+    delete process.env["CMA_AI_MODEL"];
+
+    await expect(resolveAiProviderForOrg("org-1", deps)).rejects.toBeInstanceOf(NoAiProviderConfiguredError);
   });
 
   it("never uses the env bootstrap in production", async () => {
