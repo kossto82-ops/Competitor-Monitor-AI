@@ -1,6 +1,14 @@
 import Link from "next/link";
 import { ArrowLeft, Link2 } from "lucide-react";
-import { getCompetitorForOrg, listChangeEventsForCompetitor, listMonitoredUrlsWithStatusForOrg } from "@cma/db";
+import {
+  getCompetitorActivityMetrics,
+  getCompetitorForOrg,
+  getOrganizationById,
+  getPriceHistoryForCompetitor,
+  getProductLifecycleSummary,
+  listChangeEventsForCompetitor,
+  listMonitoredUrlsWithStatusForOrg,
+} from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -9,8 +17,52 @@ import { AddUrlForm } from "@/components/app/AddUrlForm";
 import { ScanButton } from "@/components/app/ScanButton";
 import { CompetitorActions } from "@/components/app/CompetitorActions";
 import { MonitoredUrlActions } from "@/components/app/MonitoredUrlActions";
+import { ActivityMetricsCard } from "@/components/app/ActivityMetricsCard";
+import { PriceHistoryCard } from "@/components/app/PriceHistoryCard";
 import { changeTypeDisplay, jobStatusDisplay, summarizeChangeEvent, verificationStateDisplay } from "@/lib/statusDisplay";
+import { formatPeriodDeltaLabel } from "@/lib/periodDisplay";
 import { formatRelativeTime } from "@/lib/formatTime";
+
+const VALID_PERIOD_DAYS = [7, 30, 90] as const;
+
+function parsePeriodDays(value: string | undefined): number {
+  const parsed = Number(value);
+  return VALID_PERIOD_DAYS.includes(parsed as (typeof VALID_PERIOD_DAYS)[number]) ? parsed : 30;
+}
+
+/**
+ * Phase 6 (Section 8): added/removed products-or-plans, current vs.
+ * previous period - deterministic counts only, never an interpretation
+ * of WHY (Section 8 explicitly forbids reading "removed" as "business
+ * closure").
+ */
+function ProductLifecycleCard({ summary }: { summary: Awaited<ReturnType<typeof getProductLifecycleSummary>> }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Products &amp; plans</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-2xl font-semibold text-slate-900">{summary.added.current}</p>
+            <p className="text-xs text-slate-500">added · last {summary.days} days</p>
+            <p className="mt-1 text-xs text-slate-400">{formatPeriodDeltaLabel(summary.added)}</p>
+          </div>
+          <div>
+            <p className="text-2xl font-semibold text-slate-900">{summary.removed.current}</p>
+            <p className="text-xs text-slate-500">no longer detected · last {summary.days} days</p>
+            <p className="mt-1 text-xs text-slate-400">{formatPeriodDeltaLabel(summary.removed)}</p>
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-slate-400">
+          &quot;No longer detected&quot; reflects what monitoring observed on the page - it is not evidence of a business
+          decision.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
 
 function formatTimelineDate(date: Date): string {
   return new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "long", day: "numeric" }).format(date);
@@ -76,6 +128,7 @@ function CompetitorTimeline({ changeEvents }: { changeEvents: Awaited<ReturnType
 
 interface PageProps {
   params: Promise<{ competitorId: string }>;
+  searchParams: Promise<{ days?: string }>;
 }
 
 interface UrlWithStatus {
@@ -109,15 +162,24 @@ function MonitoringStatusLine({ url }: { url: UrlWithStatus }) {
   return null; // the change summary link is rendered separately by the caller
 }
 
-export default async function CompetitorDetailPage({ params }: PageProps) {
+export default async function CompetitorDetailPage({ params, searchParams }: PageProps) {
   const session = await getSession();
   if (!session) return null;
   const { competitorId } = await params;
+  const { days: daysParam } = await searchParams;
+  const days = parsePeriodDays(daysParam);
 
-  const competitor = await getCompetitorForOrg(session.organizationId, competitorId);
-  const [monitoredUrls, changeEvents] = await Promise.all([
+  const [competitor, organization] = await Promise.all([
+    getCompetitorForOrg(session.organizationId, competitorId),
+    getOrganizationById(session.organizationId),
+  ]);
+  const timezone = organization?.timezone;
+  const [monitoredUrls, changeEvents, activityMetrics, lifecycleSummary, priceHistory] = await Promise.all([
     listMonitoredUrlsWithStatusForOrg(session.organizationId, competitorId),
     listChangeEventsForCompetitor(session.organizationId, competitorId),
+    getCompetitorActivityMetrics(session.organizationId, competitorId, days, timezone),
+    getProductLifecycleSummary(session.organizationId, competitorId, days, timezone),
+    getPriceHistoryForCompetitor(session.organizationId, competitorId),
   ]);
 
   return (
@@ -138,6 +200,19 @@ export default async function CompetitorDetailPage({ params }: PageProps) {
             <AddUrlForm competitorId={competitor.id} />
           </div>
         </div>
+      </div>
+
+      <ActivityMetricsCard
+        title="Activity"
+        metrics={activityMetrics}
+        basePath={`/competitors/${competitor.id}`}
+        currentDays={days}
+        emptyDescription="No verified changes for this competitor in this period."
+      />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ProductLifecycleCard summary={lifecycleSummary} />
+        <PriceHistoryCard series={priceHistory} />
       </div>
 
       {monitoredUrls.length === 0 ? (

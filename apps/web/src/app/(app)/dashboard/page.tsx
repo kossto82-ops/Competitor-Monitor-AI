@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Building2, FileText, GitCompareArrows, Link2, ScanLine } from "lucide-react";
-import { getDashboardSummaryForOrg, getLatestReportForOrg } from "@cma/db";
+import { getDashboardSummaryForOrg, getLatestReportForOrg, getOrgActivityMetrics, getOrganizationById } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -8,6 +8,14 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { jobStatusDisplay, reportStatusDisplay, severityDisplay, summarizeChangeEvent } from "@/lib/statusDisplay";
 import { formatRelativeTime } from "@/lib/formatTime";
 import { FirstRunExplainer } from "@/components/app/FirstRunExplainer";
+import { ActivityMetricsCard } from "@/components/app/ActivityMetricsCard";
+
+const VALID_PERIOD_DAYS = [7, 30, 90] as const;
+
+function parsePeriodDays(value: string | undefined): number {
+  const parsed = Number(value);
+  return VALID_PERIOD_DAYS.includes(parsed as (typeof VALID_PERIOD_DAYS)[number]) ? parsed : 30;
+}
 
 function formatReportDate(reportDate: Date): string {
   return new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(reportDate);
@@ -73,14 +81,22 @@ function TodaysReportCard({ report }: { report: Awaited<ReturnType<typeof getLat
   );
 }
 
-export default async function DashboardPage() {
+interface PageProps {
+  searchParams: Promise<{ days?: string }>;
+}
+
+export default async function DashboardPage({ searchParams }: PageProps) {
   const session = await getSession();
   if (!session) return null; // layout already redirects; keeps TS happy
+  const { days: daysParam } = await searchParams;
+  const days = parsePeriodDays(daysParam);
 
-  const [summary, latestReport] = await Promise.all([
+  const [summary, latestReport, organization] = await Promise.all([
     getDashboardSummaryForOrg(session.organizationId),
     getLatestReportForOrg(session.organizationId),
+    getOrganizationById(session.organizationId),
   ]);
+  const activityMetrics = await getOrgActivityMetrics(session.organizationId, days, organization?.timezone);
 
   const stats = [
     { key: "competitors", label: "Competitors", value: summary.totalCompetitors, icon: Building2 },
@@ -128,6 +144,14 @@ export default async function DashboardPage() {
       </div>
 
       <TodaysReportCard report={latestReport} />
+
+      <ActivityMetricsCard
+        title="Activity overview"
+        metrics={activityMetrics}
+        basePath="/dashboard"
+        currentDays={days}
+        emptyDescription="No verified changes across any competitor in this period."
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>

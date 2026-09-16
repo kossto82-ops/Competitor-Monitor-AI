@@ -13,3 +13,4 @@ export * from "./repositories/dailyReports.js";
 export * from "./repositories/dashboard.js";
 export * from "./repositories/aiAnalysis.js";
 export * from "./repositories/aiConnections.js";
+export * from "./repositories/intelligence.js";
