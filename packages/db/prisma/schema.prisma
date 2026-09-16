@@ -139,6 +139,13 @@ model Organization {
   // this organization at all. Deliberately a single boolean, not a cron
   // expression - Section 11 asks for the minimum scheduling necessary.
   dailyReportEnabled Boolean @default(true)
+  // Phase 5 (Section 18): optional override recipient for the daily
+  // report email. NULL (the default) means "use the organization's OWNER
+  // user's email", exactly Phase 4's original behavior - see
+  // getReportRecipientEmailForOrg. Deliberately a single email, not a
+  // list - Section 18 explicitly defers "complex notification rules" to
+  // a later phase.
+  reportRecipientEmail String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

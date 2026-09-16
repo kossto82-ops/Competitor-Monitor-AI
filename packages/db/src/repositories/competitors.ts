@@ -1,6 +1,6 @@
-import type { CompetitorInput } from "@cma/core";
+import type { CompetitorInput, UpdateCompetitorInput } from "@cma/core";
 import { prisma } from "../client.js";
-import { NotFoundError } from "./errors.js";
+import { ConflictError, NotFoundError } from "./errors.js";
 
 export async function createCompetitor(organizationId: string, input: CompetitorInput) {
   return prisma.competitor.create({
@@ -32,6 +32,50 @@ export async function getCompetitorForOrg(organizationId: string, competitorId: 
   });
   if (!competitor) throw new NotFoundError("Competitor");
   return competitor;
+}
+
+/**
+ * Phase 5 (Section 3): editing an existing competitor, including
+ * deactivate/reactivate (`isActive`). Deliberately never touches
+ * MonitoredUrl/ChangeEvent rows - deactivating a competitor stops it
+ * from being scheduled going forward (see monitoredUrls.ts's
+ * listDueMonitoredUrls, which excludes URLs whose competitor is
+ * inactive) but never deletes or hides its historical intelligence.
+ */
+export async function updateCompetitor(organizationId: string, competitorId: string, input: UpdateCompetitorInput) {
+  const existing = await prisma.competitor.findFirst({ where: { id: competitorId, organizationId } });
+  if (!existing) throw new NotFoundError("Competitor");
+
+  return prisma.competitor.update({
+    where: { id: competitorId },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.website !== undefined ? { website: input.website } : {}),
+      ...(input.notes !== undefined ? { notes: input.notes } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+    },
+  });
+}
+
+/**
+ * "Delete where safe" (Section 3): a competitor with any monitored URL
+ * ever created for it (regardless of that URL's own isActive state)
+ * carries monitoring/change history that a customer might reasonably
+ * expect to keep - deleting the competitor would cascade-delete that
+ * history (see the schema's `onDelete: Cascade` on MonitoredUrl). Such
+ * a competitor must be deactivated, not deleted. Only a competitor with
+ * zero monitored URLs (nothing to lose) can actually be deleted.
+ */
+export async function deleteCompetitorIfSafe(organizationId: string, competitorId: string): Promise<void> {
+  const existing = await prisma.competitor.findFirst({ where: { id: competitorId, organizationId } });
+  if (!existing) throw new NotFoundError("Competitor");
+
+  const urlCount = await prisma.monitoredUrl.count({ where: { competitorId } });
+  if (urlCount > 0) {
+    throw new ConflictError("This competitor has monitored URLs and history - deactivate it instead of deleting it.");
+  }
+
+  await prisma.competitor.delete({ where: { id: competitorId } });
 }
 
 /**

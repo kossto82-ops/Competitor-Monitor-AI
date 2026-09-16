@@ -132,7 +132,9 @@ test.describe("AI change analysis", () => {
     await triggerScanAndWaitForTerminalState(row);
 
     await page.goto("/changes");
-    await page.getByText(competitorName).first().click();
+    // Phase 5 added a competitor filter <select> above the list, whose <option> text
+    // also matches the competitor's name but is not visible - .last() targets the actual change row.
+    await page.getByText(competitorName).last().click();
     await expect(page).toHaveURL(/\/changes\//);
     await expect(page.getByTestId("ai-analysis-panel")).toHaveCount(0);
   });

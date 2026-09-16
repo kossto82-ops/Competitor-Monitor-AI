@@ -199,13 +199,16 @@ export async function listOrganizationsForDailyReportScheduling() {
 }
 
 /**
- * Section 15: the email recipient. Deliberately the organization's own
- * OWNER user - Phase 4 does not introduce a separate configurable
- * recipient list (Section 30's "reuse/extend only where necessary"); the
- * OWNER is always the right person to notify and already exists for
- * every organization (see createOrganizationWithOwner).
+ * Section 15/18: the email recipient. Phase 5 (Section 18) adds an
+ * optional per-organization override (`Organization.reportRecipientEmail`,
+ * settable from /settings/notifications); when unset, falls back to
+ * Phase 4's original behavior - the organization's own OWNER user, who
+ * already exists for every organization (see createOrganizationWithOwner).
  */
 export async function getReportRecipientEmailForOrg(organizationId: string): Promise<string | null> {
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { reportRecipientEmail: true } });
+  if (org?.reportRecipientEmail) return org.reportRecipientEmail;
+
   const owner = await prisma.user.findFirst({
     where: { organizationId, role: "OWNER" },
     orderBy: { createdAt: "asc" },

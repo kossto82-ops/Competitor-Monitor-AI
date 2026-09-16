@@ -82,7 +82,9 @@ test.describe("Change evidence detail", () => {
     await triggerScanAndWaitForTerminalState(row);
 
     await page.goto("/changes");
-    await expect(page.getByText(competitorName)).toBeVisible();
+    // Phase 5 added a competitor filter <select> above the list, whose <option> text
+    // also matches the competitor's name but is not visible - .last() targets the actual change row.
+    await expect(page.getByText(competitorName).last()).toBeVisible();
     await expect(page.getByText(/Price changed from/)).toBeVisible();
 
     await page.getByText(/Price changed from/).click();

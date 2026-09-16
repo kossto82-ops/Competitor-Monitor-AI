@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { NotFoundError } from "@cma/db";
+import { ConflictError, NotFoundError } from "@cma/db";
 import { UnauthorizedError } from "./currentSession";
 
 /**
@@ -14,6 +14,9 @@ export function toErrorResponse(err: unknown): NextResponse {
   }
   if (err instanceof NotFoundError) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (err instanceof ConflictError) {
+    return NextResponse.json({ error: err.message }, { status: 409 });
   }
   if (err instanceof ZodError) {
     return NextResponse.json({ error: "Validation failed", details: err.flatten() }, { status: 400 });

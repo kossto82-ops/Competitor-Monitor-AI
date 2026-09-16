@@ -6,6 +6,7 @@ import {
   createAiConnection,
   deleteAiConnection,
   getAiConnectionForOrg,
+  getDecryptedAiConnectionForOrg,
   getEnabledAiConnectionConfigForOrg,
   listAiConnectionsForOrg,
   updateAiConnection,
@@ -153,6 +154,23 @@ describe.skipIf(!reachable)("AiConnection repository", () => {
     await createAiConnection(b.id, { provider: "openai", model: "gpt-5.6-luna", apiKey: "sk-b" });
 
     expect(await getEnabledAiConnectionConfigForOrg(a.id)).toBeNull();
+  });
+
+  it("getDecryptedAiConnectionForOrg (Section 9) returns the decrypted credential for the caller's own connection only", async () => {
+    const org = await makeOrg("decrypt-for-test");
+    const connection = await createAiConnection(org.id, { provider: "openai", model: "gpt-4o-mini", apiKey: "sk-test-connection" });
+
+    const config = await getDecryptedAiConnectionForOrg(org.id, connection.id);
+    expect(config).toEqual({ provider: "openai", model: "gpt-4o-mini", baseUrl: null, apiKey: "sk-test-connection" });
+  });
+
+  it("getDecryptedAiConnectionForOrg tenant isolation: organization B cannot decrypt organization A's connection", async () => {
+    const a = await makeOrg("decrypt-tenant-a");
+    const b = await makeOrg("decrypt-tenant-b");
+    const connection = await createAiConnection(a.id, { provider: "openai", model: "gpt-4o-mini", apiKey: "sk-a" });
+
+    await expect(getDecryptedAiConnectionForOrg(b.id, connection.id)).rejects.toThrow(NotFoundError);
+    await expect(getDecryptedAiConnectionForOrg(a.id, connection.id)).resolves.toMatchObject({ apiKey: "sk-a" });
   });
 
   it("delete removes the connection", async () => {

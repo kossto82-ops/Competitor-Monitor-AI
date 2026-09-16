@@ -1,14 +1,18 @@
-import { listAllActiveMonitoredUrls } from "@cma/db";
+import { listDueMonitoredUrls } from "@cma/db";
 import { createMonitoringQueue, monitoringJobId } from "@cma/queue";
 
 /**
- * Phase 1's "basic/manual scheduling" (Section: MVP scope). This is a
- * script a human (or, in Phase 9, a real cron) runs to enqueue one
- * MonitoringJob per active MonitoredUrl - it does not itself know or
- * care about `scanFrequencyMinutes`, that's future scheduler logic.
+ * Phase 1's "basic/manual scheduling", made frequency-aware in Phase 5
+ * (Section 5): a human (or a real cron, e.g. running this every 15
+ * minutes) runs this script to enqueue one MonitoringJob per
+ * MonitoredUrl that is actually DUE - never scanned yet, or its last
+ * successful scan is older than its own `scanFrequencyMinutes` (see
+ * @cma/db's listDueMonitoredUrls). A URL scanned recently is skipped
+ * this run and picked up on a later one, so `scanFrequencyMinutes` is a
+ * real, enforced setting rather than a decorative field nothing reads.
  */
 async function main() {
-  const urls = await listAllActiveMonitoredUrls();
+  const urls = await listDueMonitoredUrls();
   const queue = createMonitoringQueue();
 
   for (const url of urls) {

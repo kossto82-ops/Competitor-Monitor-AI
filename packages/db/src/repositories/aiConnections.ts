@@ -130,6 +130,30 @@ export interface DecryptedAiConnectionConfig {
   apiKey: string;
 }
 
+/**
+ * Phase 5 (Section 9): the ONE other function that returns a decrypted
+ * credential, alongside `getEnabledAiConnectionConfigForOrg` above. That
+ * function is worker-internal and organization-implicit (picks whichever
+ * connection is enabled); this one backs the customer-facing "Test
+ * connection" action on an existing, specific, tenant-scoped connection
+ * `id` - so it re-validates `organizationId` ownership the same way
+ * every other `*ForOrg` function does (NotFoundError, not silent
+ * cross-tenant access). The decrypted value it returns must still never
+ * be sent back to the browser or logged - it exists in memory only for
+ * the single outbound provider call `testAiConnection` makes, in the
+ * same server-side request that called this function.
+ */
+export async function getDecryptedAiConnectionForOrg(organizationId: string, id: string): Promise<DecryptedAiConnectionConfig> {
+  const row = await prisma.aiConnection.findFirst({ where: { id, organizationId } });
+  if (!row) throw new NotFoundError("AiConnection");
+  return {
+    provider: row.provider,
+    model: row.model,
+    baseUrl: row.baseUrl,
+    apiKey: decryptCredential(row.encryptedApiKey),
+  };
+}
+
 export async function getEnabledAiConnectionConfigForOrg(organizationId: string): Promise<DecryptedAiConnectionConfig | null> {
   const row = await prisma.aiConnection.findFirst({
     where: { organizationId, enabled: true },

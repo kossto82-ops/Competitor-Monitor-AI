@@ -26,6 +26,33 @@ export const competitorInputSchema = z.object({
 });
 export type CompetitorInput = z.infer<typeof competitorInputSchema>;
 
+/** Phase 5 (Section 3): editing an existing competitor. `isActive` is how deactivate/reactivate is expressed - never a destructive delete of history. */
+export const updateCompetitorInputSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  website: z.string().url().optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateCompetitorInput = z.infer<typeof updateCompetitorInputSchema>;
+
+/** Phase 5 (Section 4/5): editing an existing monitored URL. `scanFrequencyMinutes` is genuinely enforced by the scheduler (see apps/worker/src/enqueueAll.ts's due-only filtering), not a decorative setting. */
+export const updateMonitoredUrlInputSchema = z.object({
+  label: z.string().min(1).max(200).optional().nullable(),
+  category: z.enum(["PRODUCT_PAGE", "PRICING_PAGE", "GENERAL"]).optional(),
+  scanFrequencyMinutes: z.number().int().min(15).max(43200).optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateMonitoredUrlInput = z.infer<typeof updateMonitoredUrlInputSchema>;
+
+/** Phase 5 (Section 18): email/report preferences. All optional/independently settable - no complex notification rules yet (deferred per Section 18). */
+export const updateOrganizationSettingsInputSchema = z.object({
+  timezone: z.string().min(1).max(100).optional(),
+  dailyReportEnabled: z.boolean().optional(),
+  /** Empty string clears the override, reverting to the OWNER's email. */
+  reportRecipientEmail: z.union([z.string().email(), z.literal("")]).optional(),
+});
+export type UpdateOrganizationSettingsInput = z.infer<typeof updateOrganizationSettingsInputSchema>;
+
 export const signupInputSchema = z.object({
   organizationName: z.string().min(1).max(200),
   email: z.string().email(),

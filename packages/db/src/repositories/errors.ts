@@ -10,3 +10,18 @@ export class NotFoundError extends Error {
     this.name = "NotFoundError";
   }
 }
+
+/**
+ * Phase 5 (Section 3): "delete where safe" - thrown when a caller asks
+ * to permanently delete a row that still has dependent history a
+ * customer might reasonably want to keep auditable (e.g. a Competitor
+ * with monitored URLs, or a MonitoredUrl with recorded ChangeEvents).
+ * The API layer translates this to a 409, distinct from the 404s
+ * NotFoundError produces.
+ */
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}

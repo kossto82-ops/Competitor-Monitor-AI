@@ -1,7 +1,7 @@
-import type { MonitoredUrlInput } from "@cma/core";
+import type { MonitoredUrlInput, UpdateMonitoredUrlInput } from "@cma/core";
 import { prisma } from "../client.js";
 import { getCompetitorForOrg } from "./competitors.js";
-import { NotFoundError } from "./errors.js";
+import { ConflictError, NotFoundError } from "./errors.js";
 
 export async function createMonitoredUrl(organizationId: string, competitorId: string, input: MonitoredUrlInput) {
   // Throws NotFoundError if `competitorId` isn't this organization's -
@@ -42,6 +42,60 @@ export async function getMonitoredUrlForOrg(organizationId: string, monitoredUrl
  */
 export async function listAllActiveMonitoredUrls() {
   return prisma.monitoredUrl.findMany({ where: { isActive: true } });
+}
+
+/**
+ * Phase 5 (Section 5): the minimum real backend support for
+ * `scanFrequencyMinutes` the brief asks for INSTEAD of a fake UI control -
+ * a URL is "due" when it has never been successfully scanned, or its
+ * last successful scan is older than its own configured frequency.
+ * Also excludes URLs whose competitor was deactivated (Section 3:
+ * deactivating a competitor stops future scheduling without deleting
+ * history). Deliberately NOT tenant-scoped, same reason as
+ * listAllActiveMonitoredUrls above - this is the scheduler's entry
+ * point (apps/worker/src/enqueueAll.ts), never a per-tenant API route.
+ */
+export async function listDueMonitoredUrls(now: Date = new Date()) {
+  const urls = await prisma.monitoredUrl.findMany({
+    where: { isActive: true, competitor: { isActive: true } },
+  });
+  return urls.filter((url) => {
+    if (!url.lastSuccessfulScanAt) return true;
+    const dueAt = new Date(url.lastSuccessfulScanAt.getTime() + url.scanFrequencyMinutes * 60_000);
+    return dueAt <= now;
+  });
+}
+
+/** Phase 5 (Section 4): editing an existing monitored URL - label, category, frequency, and pause/resume (`isActive`). */
+export async function updateMonitoredUrl(organizationId: string, monitoredUrlId: string, input: UpdateMonitoredUrlInput) {
+  await getMonitoredUrlForOrg(organizationId, monitoredUrlId);
+
+  return prisma.monitoredUrl.update({
+    where: { id: monitoredUrlId },
+    data: {
+      ...(input.label !== undefined ? { label: input.label } : {}),
+      ...(input.category !== undefined ? { category: input.category } : {}),
+      ...(input.scanFrequencyMinutes !== undefined ? { scanFrequencyMinutes: input.scanFrequencyMinutes } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+    },
+  });
+}
+
+/**
+ * "Delete where safe" (Section 4), same principle as
+ * deleteCompetitorIfSafe: a URL with any recorded Snapshot/ChangeEvent
+ * history must be paused (isActive=false), not deleted - deleting it
+ * would cascade-delete that auditable history.
+ */
+export async function deleteMonitoredUrlIfSafe(organizationId: string, monitoredUrlId: string): Promise<void> {
+  await getMonitoredUrlForOrg(organizationId, monitoredUrlId);
+
+  const snapshotCount = await prisma.snapshot.count({ where: { monitoredUrlId } });
+  if (snapshotCount > 0) {
+    throw new ConflictError("This URL has monitoring history - pause it instead of deleting it.");
+  }
+
+  await prisma.monitoredUrl.delete({ where: { id: monitoredUrlId } });
 }
 
 /**

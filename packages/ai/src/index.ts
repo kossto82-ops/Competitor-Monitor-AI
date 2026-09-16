@@ -23,6 +23,7 @@ export * from "./parseOutput.js";
 export * from "./analyzeChangeWithRetry.js";
 export * from "./analyzeAndValidateChange.js";
 export * from "./registry.js";
+export * from "./testConnection.js";
 export * from "./providers/fakeProvider.js";
 export * from "./providers/openaiProvider.js";
 export * from "./providers/openaiCompatibleProvider.js";

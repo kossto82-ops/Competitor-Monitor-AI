@@ -1,14 +1,78 @@
 import Link from "next/link";
 import { ArrowLeft, Link2 } from "lucide-react";
-import { getCompetitorForOrg, listMonitoredUrlsWithStatusForOrg } from "@cma/db";
+import { getCompetitorForOrg, listChangeEventsForCompetitor, listMonitoredUrlsWithStatusForOrg } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
-import { Card } from "@/components/ui/Card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { AddUrlForm } from "@/components/app/AddUrlForm";
 import { ScanButton } from "@/components/app/ScanButton";
-import { jobStatusDisplay, summarizeChangeEvent, verificationStateDisplay } from "@/lib/statusDisplay";
+import { CompetitorActions } from "@/components/app/CompetitorActions";
+import { MonitoredUrlActions } from "@/components/app/MonitoredUrlActions";
+import { changeTypeDisplay, jobStatusDisplay, summarizeChangeEvent, verificationStateDisplay } from "@/lib/statusDisplay";
 import { formatRelativeTime } from "@/lib/formatTime";
+
+function formatTimelineDate(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "long", day: "numeric" }).format(date);
+}
+
+/**
+ * Phase 5 (Section 15): a basic competitor timeline - every verified
+ * change across ALL of this competitor's monitored URLs, grouped by
+ * calendar day, each linking to its evidence. Deliberately just a
+ * grouped list (Section 14: "do NOT build a complex analytics
+ * platform") - no trend lines, no predictive anything.
+ */
+function CompetitorTimeline({ changeEvents }: { changeEvents: Awaited<ReturnType<typeof listChangeEventsForCompetitor>> }) {
+  if (changeEvents.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Timeline</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-slate-400">No verified changes yet for this competitor.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const groups = new Map<string, typeof changeEvents>();
+  for (const event of changeEvents) {
+    const key = formatTimelineDate(event.detectedAt);
+    const existing = groups.get(key);
+    if (existing) existing.push(event);
+    else groups.set(key, [event]);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Timeline</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {Array.from(groups.entries()).map(([day, events]) => (
+          <div key={day}>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{day}</p>
+            <ul className="mt-2 space-y-2">
+              {events.map((event) => {
+                const type = changeTypeDisplay(event.changeType);
+                return (
+                  <li key={event.id}>
+                    <Link href={`/changes/${event.id}`} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50">
+                      <Badge tone={type.tone}>{type.label}</Badge>
+                      <span className="truncate text-sm text-slate-700">{summarizeChangeEvent(event)}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
 
 interface PageProps {
   params: Promise<{ competitorId: string }>;
@@ -51,7 +115,10 @@ export default async function CompetitorDetailPage({ params }: PageProps) {
   const { competitorId } = await params;
 
   const competitor = await getCompetitorForOrg(session.organizationId, competitorId);
-  const monitoredUrls = await listMonitoredUrlsWithStatusForOrg(session.organizationId, competitorId);
+  const [monitoredUrls, changeEvents] = await Promise.all([
+    listMonitoredUrlsWithStatusForOrg(session.organizationId, competitorId),
+    listChangeEventsForCompetitor(session.organizationId, competitorId),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -60,12 +127,16 @@ export default async function CompetitorDetailPage({ params }: PageProps) {
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Competitors
         </Link>
-        <div className="mt-2 flex items-center justify-between">
+        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold text-slate-900">{competitor.name}</h1>
             {competitor.website ? <p className="text-sm text-slate-500">{competitor.website}</p> : null}
+            {competitor.notes ? <p className="mt-1 max-w-xl text-sm text-slate-500">{competitor.notes}</p> : null}
           </div>
-          <AddUrlForm competitorId={competitor.id} />
+          <div className="flex flex-col items-end gap-2">
+            <CompetitorActions competitor={competitor} />
+            <AddUrlForm competitorId={competitor.id} />
+          </div>
         </div>
       </div>
 
@@ -88,6 +159,7 @@ export default async function CompetitorDetailPage({ params }: PageProps) {
                     <div className="flex items-center gap-2">
                       <p className="truncate text-sm font-medium text-slate-900">{url.label ?? url.url}</p>
                       <Badge tone="gray">{url.category.replace("_", " ").toLowerCase()}</Badge>
+                      {!url.isActive ? <Badge tone="amber">Paused</Badge> : null}
                     </div>
                     <p className="truncate text-xs text-slate-400">{url.url}</p>
                     <MonitoringStatusLine url={url} />
@@ -103,13 +175,18 @@ export default async function CompetitorDetailPage({ params }: PageProps) {
                     </p>
                   </div>
 
-                  <ScanButton monitoredUrlId={url.id} initialStatus={status} />
+                  <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+                    <MonitoredUrlActions url={url} />
+                    <ScanButton monitoredUrlId={url.id} initialStatus={status} />
+                  </div>
                 </li>
               );
             })}
           </ul>
         </Card>
       )}
+
+      <CompetitorTimeline changeEvents={changeEvents} />
     </div>
   );
 }

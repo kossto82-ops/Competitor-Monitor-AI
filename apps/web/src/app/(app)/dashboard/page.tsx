@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { jobStatusDisplay, reportStatusDisplay, severityDisplay, summarizeChangeEvent } from "@/lib/statusDisplay";
 import { formatRelativeTime } from "@/lib/formatTime";
+import { FirstRunExplainer } from "@/components/app/FirstRunExplainer";
 
 function formatReportDate(reportDate: Date): string {
   return new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(reportDate);
@@ -87,6 +88,21 @@ export default async function DashboardPage() {
     { key: "scans-24h", label: "Scans (24h)", value: summary.scansLast24h, icon: ScanLine },
     { key: "changes-7d", label: "Changes (7d)", value: summary.changesLast7d, icon: GitCompareArrows },
   ];
+
+  // Section 1/2: a brand-new organization sees the product explainer and
+  // the "add your first competitor" call to action instead of an empty
+  // dashboard full of zeroes.
+  if (summary.totalCompetitors === 0) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-900">Dashboard</h1>
+          <p className="text-sm text-slate-500">An overview of what your monitored competitors are doing.</p>
+        </div>
+        <FirstRunExplainer />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

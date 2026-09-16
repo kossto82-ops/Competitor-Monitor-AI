@@ -1,3 +1,4 @@
+import type { UpdateOrganizationSettingsInput } from "@cma/core";
 import { prisma } from "../client.js";
 
 export interface CreateOrganizationInput {
@@ -36,4 +37,21 @@ export async function getOrganizationById(organizationId: string) {
  */
 export async function getUserForOrg(organizationId: string, userId: string) {
   return prisma.user.findFirst({ where: { id: userId, organizationId } });
+}
+
+/**
+ * Phase 5 (Section 18): the customer-facing email/report preferences -
+ * daily report enabled/disabled, recipient override, timezone. An empty
+ * string for `reportRecipientEmail` clears the override (falls back to
+ * the OWNER's email, see dailyReports.ts's getReportRecipientEmailForOrg).
+ */
+export async function updateOrganizationSettings(organizationId: string, input: UpdateOrganizationSettingsInput) {
+  return prisma.organization.update({
+    where: { id: organizationId },
+    data: {
+      ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
+      ...(input.dailyReportEnabled !== undefined ? { dailyReportEnabled: input.dailyReportEnabled } : {}),
+      ...(input.reportRecipientEmail !== undefined ? { reportRecipientEmail: input.reportRecipientEmail || null } : {}),
+    },
+  });
 }
