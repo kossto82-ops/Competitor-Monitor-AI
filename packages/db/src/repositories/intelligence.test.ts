@@ -7,9 +7,12 @@ import {
   compareCompetitors,
   getCompetitiveContext,
   getCompetitorActivityMetrics,
+  getDigestForOrganization,
   getOrgActivityMetrics,
   getPriceHistoryForCompetitor,
   getProductLifecycleSummary,
+  type ChangeEventDigestItem,
+  type LifecycleDigestItem,
 } from "./intelligence.js";
 import type { ChangeType } from "../../generated/client/index.js";
 
@@ -516,6 +519,227 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       // getActivityPattern + getRepeatedPriceChangePatterns + the new latest-event-with-id lookup,
       // all for exactly 1 competitor - not proportional to the 15 ChangeEvents created above.
       expect(queryCount).toBeLessThanOrEqual(16);
+    });
+  });
+
+  describe("getDigestForOrganization (Phase 10)", () => {
+    async function makeCompetitor(orgId: string, name: string, createdAt?: Date) {
+      const competitor = await createCompetitor(orgId, { name });
+      if (createdAt) {
+        await prisma.competitor.update({ where: { id: competitor.id }, data: { createdAt } });
+      }
+      return competitor;
+    }
+
+    it("returns an empty digest for an organization with zero competitors", async () => {
+      const org = await makeOrg("DigestNoCompetitors");
+      const result = await getDigestForOrganization(org.id, 30);
+      expect(result.items).toEqual([]);
+      expect(result.totalTrackedCompetitors).toBe(0);
+      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 0, totalTrackedCompetitors: 0 });
+    });
+
+    it("returns an empty digest for an organization with competitors but zero ChangeEvents", async () => {
+      const org = await makeOrg("DigestNoEvents");
+      await makeCompetitor(org.id, "Quiet Co");
+      const result = await getDigestForOrganization(org.id, 30);
+      expect(result.items).toEqual([]);
+      expect(result.totalTrackedCompetitors).toBe(1);
+    });
+
+    it("surfaces raw ChangeEvents as CHANGE_EVENT items for a freshly-tracked competitor (no qualifying pattern yet)", async () => {
+      const org = await makeOrg("DigestRawChanges");
+      const comp = await makeCompetitor(org.id, "Fresh Digest Co"); // default createdAt (today) - can never qualify a pattern
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-fresh.example.test", category: "GENERAL" });
+      await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", detectedAt: new Date(Date.now() - 1 * DAY) });
+      await createChangeEvent(org.id, url.id, { changeType: "CONTENT_CHANGE", entityKey: null, detectedAt: new Date(Date.now() - 2 * DAY) });
+
+      const result = await getDigestForOrganization(org.id, 30);
+
+      const changeItems = result.items.filter((i): i is ChangeEventDigestItem => i.kind === "CHANGE_EVENT");
+      expect(changeItems).toHaveLength(2);
+      for (const item of changeItems) {
+        expect(item.changeEventIds).toEqual([item.changeEventId]);
+        expect(item.competitorId).toBe(comp.id);
+      }
+      // No pattern item yet - the competitor was created today, so getActivityPattern is INSUFFICIENT_HISTORY.
+      expect(result.items.some((i) => i.kind === "ACTIVITY_PATTERN")).toBe(false);
+      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 0, totalTrackedCompetitors: 1 });
+    });
+
+    it("includes an ACTIVITY_PATTERN item only once the pattern qualifies, with real evidence event ids", async () => {
+      const org = await makeOrg("DigestPatternQualifies");
+      const comp = await makeCompetitor(org.id, "Established Digest Co", new Date(Date.now() - 150 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-established.example.test", category: "GENERAL" });
+
+      // Baseline: 1/window across 3 historical windows.
+      for (const daysAgo of [45, 75, 105]) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `baseline-${daysAgo}` });
+      }
+      // Current window: 4 events -> ratio 4.0 >= 1.5 -> ABOVE_BASELINE.
+      for (const daysAgo of [1, 5, 10, 20]) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `current-${daysAgo}` });
+      }
+
+      const result = await getDigestForOrganization(org.id, 30);
+      const patternItems = result.items.filter((i) => i.kind === "ACTIVITY_PATTERN");
+      expect(patternItems).toHaveLength(1);
+      const patternItem = patternItems[0]!;
+      if (patternItem.kind !== "ACTIVITY_PATTERN") throw new Error("unreachable");
+      expect(patternItem.pattern.qualifies).toBe(true);
+      expect(patternItem.pattern.direction).toBe("ABOVE_BASELINE");
+      expect(patternItem.changeEventIds).toHaveLength(4); // exactly the 4 current-window events, never the baseline ones
+      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 1, totalTrackedCompetitors: 1 });
+    });
+
+    it("includes a REPEATED_PRICE_CHANGE item only for entities meeting the qualifying threshold (>= 2 price changes)", async () => {
+      const org = await makeOrg("DigestRepeatedPrice");
+      const comp = await makeCompetitor(org.id, "Repeat Digest Co");
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-repeat.example.test", category: "GENERAL" });
+      // "pro-plan" changes price twice - qualifies. "basic-plan" changes once - does not.
+      await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "pro-plan", detectedAt: new Date(Date.now() - 10 * DAY) });
+      await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "pro-plan", detectedAt: new Date(Date.now() - 2 * DAY) });
+      await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "basic-plan", detectedAt: new Date(Date.now() - 5 * DAY) });
+
+      const result = await getDigestForOrganization(org.id, 30);
+      const repeatedItems = result.items.filter((i) => i.kind === "REPEATED_PRICE_CHANGE");
+      expect(repeatedItems).toHaveLength(1);
+      const repeatedItem = repeatedItems[0]!;
+      if (repeatedItem.kind !== "REPEATED_PRICE_CHANGE") throw new Error("unreachable");
+      expect(repeatedItem.pattern.entityKey).toBe("pro-plan");
+      expect(repeatedItem.pattern.changeCount).toBe(2);
+      expect(repeatedItem.changeEventIds).toHaveLength(2);
+      // 3 raw CHANGE_EVENT items still appear regardless (never hidden by the pattern layer).
+      expect(result.items.filter((i) => i.kind === "CHANGE_EVENT")).toHaveLength(3);
+    });
+
+    it("includes a LIFECYCLE item with correct added/removed counts and evidence, only when something was added or removed", async () => {
+      const org = await makeOrg("DigestLifecycle");
+      const comp = await makeCompetitor(org.id, "Lifecycle Digest Co");
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-lifecycle.example.test", category: "GENERAL" });
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_ADDED", entityKey: "new-plan-1", detectedAt: new Date(Date.now() - 3 * DAY) });
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_ADDED", entityKey: "new-plan-2", detectedAt: new Date(Date.now() - 2 * DAY) });
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_REMOVED", entityKey: "old-plan", detectedAt: new Date(Date.now() - 1 * DAY) });
+
+      const result = await getDigestForOrganization(org.id, 30);
+      const lifecycleItems = result.items.filter((i): i is LifecycleDigestItem => i.kind === "LIFECYCLE");
+      expect(lifecycleItems).toHaveLength(1);
+      expect(lifecycleItems[0]!.added).toBe(2);
+      expect(lifecycleItems[0]!.removed).toBe(1);
+      expect(lifecycleItems[0]!.changeEventIds).toHaveLength(3);
+    });
+
+    it("does NOT include a LIFECYCLE item when nothing was added or removed in the window", async () => {
+      const org = await makeOrg("DigestNoLifecycle");
+      const comp = await makeCompetitor(org.id, "No Lifecycle Co");
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-no-lifecycle.example.test", category: "GENERAL" });
+      await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", detectedAt: new Date(Date.now() - 1 * DAY) });
+
+      const result = await getDigestForOrganization(org.id, 30);
+      expect(result.items.some((i) => i.kind === "LIFECYCLE")).toBe(false);
+    });
+
+    it("computes the cross-competitor 'N of M above baseline' count as a plain, purely descriptive tally", async () => {
+      const org = await makeOrg("DigestCrossCompetitor");
+      const above = await makeCompetitor(org.id, "Above Co", new Date(Date.now() - 150 * DAY));
+      const fresh = await makeCompetitor(org.id, "Fresh Co");
+      const urlAbove = await createMonitoredUrl(org.id, above.id, { url: "https://digest-cc-above.example.test", category: "GENERAL" });
+      await createMonitoredUrl(org.id, fresh.id, { url: "https://digest-cc-fresh.example.test", category: "GENERAL" });
+
+      for (const daysAgo of [45, 75, 105]) {
+        await createChangeEvent(org.id, urlAbove.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `b-${daysAgo}` });
+      }
+      for (const daysAgo of [1, 5, 10, 20]) {
+        await createChangeEvent(org.id, urlAbove.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `c-${daysAgo}` });
+      }
+
+      const result = await getDigestForOrganization(org.id, 30);
+      // 1 of 2 tracked competitors (fresh cannot qualify) is currently ABOVE_BASELINE.
+      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 1, totalTrackedCompetitors: 2 });
+    });
+
+    it("excludes a deactivated (isActive: false) competitor from the tracked set entirely", async () => {
+      const org = await makeOrg("DigestInactiveExcluded");
+      const active = await makeCompetitor(org.id, "Active Co");
+      const inactive = await makeCompetitor(org.id, "Inactive Co");
+      await prisma.competitor.update({ where: { id: inactive.id }, data: { isActive: false } });
+      const urlInactive = await createMonitoredUrl(org.id, inactive.id, { url: "https://digest-inactive.example.test", category: "GENERAL" });
+      await createChangeEvent(org.id, urlInactive.id, { detectedAt: new Date(Date.now() - 1 * DAY) });
+
+      const result = await getDigestForOrganization(org.id, 30);
+      expect(result.totalTrackedCompetitors).toBe(1);
+      expect(result.items.every((i) => i.competitorId !== inactive.id)).toBe(true);
+      void active;
+    });
+
+    it("orders items deterministically by detectedAt DESC, with a stable documented tie-break", async () => {
+      const org = await makeOrg("DigestOrdering");
+      const compA = await makeCompetitor(org.id, "Order A Co");
+      const compB = await makeCompetitor(org.id, "Order B Co");
+      const urlA = await createMonitoredUrl(org.id, compA.id, { url: "https://digest-order-a.example.test", category: "GENERAL" });
+      const urlB = await createMonitoredUrl(org.id, compB.id, { url: "https://digest-order-b.example.test", category: "GENERAL" });
+
+      await createChangeEvent(org.id, urlA.id, { detectedAt: new Date(Date.now() - 1 * DAY) });
+      await createChangeEvent(org.id, urlB.id, { detectedAt: new Date(Date.now() - 5 * DAY) });
+      await createChangeEvent(org.id, urlA.id, { detectedAt: new Date(Date.now() - 10 * DAY) });
+
+      const result = await getDigestForOrganization(org.id, 30);
+      const timestamps = result.items.map((i) => i.detectedAt.getTime());
+      const sorted = [...timestamps].sort((a, b) => b - a);
+      expect(timestamps).toEqual(sorted);
+    });
+
+    it("never returns an item with an empty changeEventIds evidence list", async () => {
+      const org = await makeOrg("DigestEvidenceAlwaysPresent");
+      const comp = await makeCompetitor(org.id, "Evidence Digest Co", new Date(Date.now() - 150 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-evidence.example.test", category: "GENERAL" });
+      for (const daysAgo of [45, 75, 105]) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `e-${daysAgo}` });
+      }
+      for (const daysAgo of [1, 2, 5, 10]) {
+        await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "recurring-plan", detectedAt: new Date(Date.now() - daysAgo * DAY) });
+      }
+
+      const result = await getDigestForOrganization(org.id, 30);
+      expect(result.items.length).toBeGreaterThan(0);
+      for (const item of result.items) {
+        expect(item.changeEventIds.length).toBeGreaterThan(0);
+      }
+    });
+
+    it("does not duplicate items of the same kind for the same competitor/evidence (one ACTIVITY_PATTERN and one LIFECYCLE item per competitor per digest call)", async () => {
+      const org = await makeOrg("DigestNoDuplicateItems");
+      const comp = await makeCompetitor(org.id, "No Dup Digest Co", new Date(Date.now() - 150 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-no-dup.example.test", category: "GENERAL" });
+      for (const daysAgo of [45, 75, 105]) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `d-${daysAgo}` });
+      }
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_ADDED", detectedAt: new Date(Date.now() - 1 * DAY), entityKey: "added-1" });
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_ADDED", detectedAt: new Date(Date.now() - 2 * DAY), entityKey: "added-2" });
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_ADDED", detectedAt: new Date(Date.now() - 3 * DAY), entityKey: "added-3" });
+
+      const result = await getDigestForOrganization(org.id, 30);
+      expect(result.items.filter((i) => i.kind === "ACTIVITY_PATTERN")).toHaveLength(1);
+      expect(result.items.filter((i) => i.kind === "LIFECYCLE")).toHaveLength(1);
+    });
+
+    it("enforces organization isolation: another organization's digest never contains this organization's competitors or evidence", async () => {
+      const orgA = await makeOrg("DigestIsoA");
+      const orgB = await makeOrg("DigestIsoB");
+      const compA = await makeCompetitor(orgA.id, "Iso Digest A Co", new Date(Date.now() - 150 * DAY));
+      const urlA = await createMonitoredUrl(orgA.id, compA.id, { url: "https://digest-iso-a.example.test", category: "GENERAL" });
+      for (const daysAgo of [1, 5, 10, 20, 45, 75, 105]) {
+        await createChangeEvent(orgA.id, urlA.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `iso-${daysAgo}` });
+      }
+      await makeCompetitor(orgB.id, "B Own Digest Co");
+
+      const resultB = await getDigestForOrganization(orgB.id, 30);
+      expect(resultB.totalTrackedCompetitors).toBe(1);
+      expect(resultB.items).toEqual([]);
+      expect(resultB.items.every((i) => i.competitorId !== compA.id)).toBe(true);
+
+      const resultA = await getDigestForOrganization(orgA.id, 30);
+      expect(resultA.crossCompetitorContext.aboveBaselineCount).toBe(1);
     });
   });
 });

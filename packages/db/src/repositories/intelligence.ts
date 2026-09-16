@@ -15,10 +15,10 @@
  * (never inferred through a join), matching the tenant-isolation
  * convention documented at the top of schema.prisma.
  */
-import { calculatePeriodDelta, resolveComparisonWindow, type PeriodDelta } from "@cma/core";
-import type { ChangeType } from "../../generated/client/index.js";
+import { calculatePeriodDelta, describeChangeEvent, resolveComparisonWindow, type PeriodDelta } from "@cma/core";
+import type { ChangeType, Severity } from "../../generated/client/index.js";
 import { prisma } from "../client.js";
-import { getActivityPattern, getRepeatedPriceChangePatterns, type ActivityPattern } from "./patterns.js";
+import { getActivityPattern, getRepeatedPriceChangePatterns, type ActivityPattern, type RepeatedPriceChangePattern } from "./patterns.js";
 
 const CHANGE_TYPES: ChangeType[] = ["PRICE_CHANGE", "PRODUCT_ADDED", "PRODUCT_REMOVED", "PROMOTION_CHANGE", "CONTENT_CHANGE"];
 
@@ -388,4 +388,333 @@ export async function getCompetitiveContext(
       };
     }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10: Deterministic Digest - a per-organization, evidence-linked
+// composition of already-existing facts (ChangeEvent, ActivityPattern,
+// RepeatedPriceChangePattern) across every actively-tracked competitor. See
+// PHASE10-VALIDATION-REPORT.md and PHASE9-PRODUCT-DIRECTION-AUDIT.md Section
+// 14 for why this is pure composition, not a new tier of intelligence:
+// every field below is either a direct ChangeEvent column or an
+// already-tested Phase 7 pattern object, reused verbatim. There is NO new
+// baseline formula, NO importance/relevance score, and NO AI call anywhere
+// in this function.
+// ---------------------------------------------------------------------------
+
+/** Fixed, documented tie-break order for items sharing the same `detectedAt` - never a hidden importance ranking, just a stable sort key. */
+const DIGEST_ITEM_KIND_ORDER = ["CHANGE_EVENT", "REPEATED_PRICE_CHANGE", "ACTIVITY_PATTERN", "LIFECYCLE"] as const;
+export type DigestItemKind = (typeof DIGEST_ITEM_KIND_ORDER)[number];
+
+interface DigestItemCommon {
+  competitorId: string;
+  competitorName: string;
+  /** Used for primary ordering (recency-first, descending) - never an importance score. */
+  detectedAt: Date;
+  /** Every digest item MUST carry at least one real ChangeEvent id - see the module doc comment above and PHASE10-VALIDATION-REPORT.md's Evidence Requirement section. Never empty. */
+  changeEventIds: string[];
+}
+
+/** A single raw, verified ChangeEvent - always eligible, regardless of any pattern's qualification state. */
+export interface ChangeEventDigestItem extends DigestItemCommon {
+  kind: "CHANGE_EVENT";
+  changeEventId: string;
+  changeType: ChangeType;
+  severity: Severity;
+  /** The exact sentence statusDisplay.ts's summarizeChangeEvent (@cma/core's describeChangeEvent) already renders elsewhere - never a second, independently-worded description of the same fact. */
+  description: string;
+}
+
+/** A qualifying (changeCount >= 2) repeated price-change pattern for one product/plan - reused verbatim from patterns.ts, never re-derived. */
+export interface RepeatedPriceChangeDigestItem extends DigestItemCommon {
+  kind: "REPEATED_PRICE_CHANGE";
+  pattern: RepeatedPriceChangePattern;
+}
+
+/** A qualifying (qualifies === true) activity-vs-own-baseline pattern - reused verbatim from patterns.ts. Only ever compared against THIS competitor's own accumulated history. */
+export interface ActivityPatternDigestItem extends DigestItemCommon {
+  kind: "ACTIVITY_PATTERN";
+  pattern: ActivityPattern;
+}
+
+/** A deterministic added/removed roll-up for this competitor within the digest window, derived from the same raw ChangeEvents already fetched for the CHANGE_EVENT items above (see the function doc comment for why this is NOT a second call to getProductLifecycleSummary). */
+export interface LifecycleDigestItem extends DigestItemCommon {
+  kind: "LIFECYCLE";
+  added: number;
+  removed: number;
+}
+
+export type DigestItem = ChangeEventDigestItem | RepeatedPriceChangeDigestItem | ActivityPatternDigestItem | LifecycleDigestItem;
+
+export interface DigestCrossCompetitorContext {
+  /** Count of tracked competitors whose ActivityPattern.direction is currently ABOVE_BASELINE (implies qualifies === true - see patterns.ts). Purely descriptive counting, never a causal/coordination claim - see PHASE9-PRODUCT-DIRECTION-AUDIT.md Section 9. */
+  aboveBaselineCount: number;
+  /** Total actively-tracked competitors for this organization, regardless of whether their own pattern qualifies yet. */
+  totalTrackedCompetitors: number;
+}
+
+export interface DigestResult {
+  days: number;
+  timezone: string;
+  windowStart: Date;
+  windowEnd: Date;
+  totalTrackedCompetitors: number;
+  /** Deterministically ordered: detectedAt DESC, then competitorId ASC, then a fixed kind order, then a stable id - see DIGEST_ITEM_KIND_ORDER above. Never truncated/hidden by an importance score. */
+  items: DigestItem[];
+  crossCompetitorContext: DigestCrossCompetitorContext;
+}
+
+function digestItemStableId(item: DigestItem): string {
+  switch (item.kind) {
+    case "CHANGE_EVENT":
+      return item.changeEventId;
+    case "REPEATED_PRICE_CHANGE":
+      return `${item.pattern.monitoredUrlId}::${item.pattern.entityKey}`;
+    case "ACTIVITY_PATTERN":
+      return `activity::${item.competitorId}`;
+    case "LIFECYCLE":
+      return `lifecycle::${item.competitorId}`;
+  }
+}
+
+/**
+ * Deterministic ordering (see PHASE9-PRODUCT-DIRECTION-AUDIT.md Section 14
+ * and PHASE10-VALIDATION-REPORT.md): newest verified information first.
+ * Ties are broken by a fixed, documented, stable key - never a hidden
+ * relevance/importance score.
+ */
+function compareDigestItems(a: DigestItem, b: DigestItem): number {
+  const byDate = b.detectedAt.getTime() - a.detectedAt.getTime();
+  if (byDate !== 0) return byDate;
+  const byCompetitor = a.competitorId.localeCompare(b.competitorId);
+  if (byCompetitor !== 0) return byCompetitor;
+  const byKind = DIGEST_ITEM_KIND_ORDER.indexOf(a.kind) - DIGEST_ITEM_KIND_ORDER.indexOf(b.kind);
+  if (byKind !== 0) return byKind;
+  return digestItemStableId(a).localeCompare(digestItemStableId(b));
+}
+
+interface DigestRawChangeEvent {
+  id: string;
+  competitorId: string;
+  changeType: ChangeType;
+  severity: Severity;
+  detectedAt: Date;
+  oldValue: string | null;
+  newValue: string | null;
+  currency: string | null;
+  percentageChange: number | null;
+}
+
+/**
+ * A single bulk query for every ChangeEvent in the digest window across
+ * every tracked competitor - bounded by window volume (a small,
+ * customer-controlled `days` value), NOT by (competitor count x event
+ * count), matching PHASE10-VALIDATION-REPORT.md's Performance section.
+ * The per-competitor pattern calls in getDigestForOrganization remain
+ * bounded by the number of tracked competitors (Promise.all, same
+ * convention as getCompetitiveContext) - this function avoids adding a
+ * second per-competitor query on top of those for the raw-change/lifecycle
+ * content.
+ */
+async function listRecentChangeEventsForDigest(
+  organizationId: string,
+  competitorIds: string[],
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<DigestRawChangeEvent[]> {
+  if (competitorIds.length === 0) return [];
+  const events = await prisma.changeEvent.findMany({
+    where: {
+      organizationId,
+      monitoredUrl: { competitorId: { in: competitorIds } },
+      detectedAt: { gte: windowStart, lt: windowEnd },
+    },
+    orderBy: { detectedAt: "desc" },
+    select: {
+      id: true,
+      changeType: true,
+      severity: true,
+      detectedAt: true,
+      oldValue: true,
+      newValue: true,
+      currency: true,
+      percentageChange: true,
+      monitoredUrl: { select: { competitorId: true } },
+    },
+  });
+  return events.map((e) => ({
+    id: e.id,
+    competitorId: e.monitoredUrl.competitorId,
+    changeType: e.changeType,
+    severity: e.severity,
+    detectedAt: e.detectedAt,
+    oldValue: e.oldValue,
+    newValue: e.newValue,
+    currency: e.currency,
+    percentageChange: e.percentageChange,
+  }));
+}
+
+/**
+ * Phase 10: composes the existing pattern/derived-fact layer into one
+ * per-organization, evidence-linked feed - see
+ * PHASE9-PRODUCT-DIRECTION-AUDIT.md Section 14 for the product rationale
+ * and PHASE10-VALIDATION-REPORT.md for the full design/validation record.
+ *
+ * Scope: every ACTIVELY TRACKED (isActive: true) competitor for this
+ * organization - matches dailyReports.ts's countActiveCompetitorsForOrg
+ * convention exactly, so the digest's "N of M tracked competitors" count
+ * never silently diverges from the daily report's "N competitors
+ * monitored" vocabulary (PHASE9 Section 15's open question, resolved here
+ * by reusing the exact same `isActive: true` scope, not a new definition
+ * of "tracked").
+ *
+ * ZERO new baseline formula, ZERO new schema, ZERO AI calls - every item
+ * is either a direct ChangeEvent row or a verbatim Phase 7
+ * ActivityPattern/RepeatedPriceChangePattern object.
+ *
+ * `now` is an injectable parameter (default `new Date()`, same convention
+ * as getActivityPattern/getRepeatedPriceChangePatterns) and is threaded
+ * through EVERY sub-call and the raw ChangeEvent fetch below, so all three
+ * data sources compute against the EXACT same [now-days, now) window -
+ * without this, two separately-taken `new Date()` timestamps a few
+ * milliseconds apart could disagree at a boundary and make the digest's
+ * "current" counts inconsistent with its own evidence list. This also
+ * makes the whole function deterministically testable.
+ *
+ * Deliberately does NOT call getProductLifecycleSummary /
+ * getCompetitorActivityMetrics for the lifecycle roll-up: those functions
+ * do not accept an injectable `now` (they always resolve their own window
+ * via `new Date()` at call time), which would both break the
+ * single-shared-`now` guarantee above and require a second per-competitor
+ * query pair on top of the bulk fetch this function already does. Added/
+ * removed counts are instead derived directly from the same raw
+ * ChangeEvent window already fetched for the CHANGE_EVENT items - the
+ * numbers are provably identical (same organizationId/competitorId/
+ * changeType/window), just computed once, deterministically, in memory.
+ */
+export async function getDigestForOrganization(
+  organizationId: string,
+  days: number,
+  timezone: string | null | undefined = "UTC",
+  now: Date = new Date(),
+): Promise<DigestResult> {
+  const window = resolveComparisonWindow(days, timezone, now);
+
+  const competitors = await prisma.competitor.findMany({
+    where: { organizationId, isActive: true },
+    select: { id: true, name: true },
+  });
+
+  const emptyResult: DigestResult = {
+    days,
+    timezone: window.timezone,
+    windowStart: window.currentStart,
+    windowEnd: window.currentEnd,
+    totalTrackedCompetitors: 0,
+    items: [],
+    crossCompetitorContext: { aboveBaselineCount: 0, totalTrackedCompetitors: 0 },
+  };
+  if (competitors.length === 0) return emptyResult;
+
+  const competitorIds = competitors.map((c) => c.id);
+  const nameById = new Map(competitors.map((c) => [c.id, c.name]));
+
+  const rawEvents = await listRecentChangeEventsForDigest(organizationId, competitorIds, window.currentStart, window.currentEnd);
+  const eventsByCompetitor = new Map<string, DigestRawChangeEvent[]>();
+  for (const event of rawEvents) {
+    const list = eventsByCompetitor.get(event.competitorId);
+    if (list) list.push(event);
+    else eventsByCompetitor.set(event.competitorId, [event]);
+  }
+
+  const perCompetitorResults = await Promise.all(
+    competitors.map(async (competitor) => {
+      const [activityPattern, repeatedPricePatterns] = await Promise.all([
+        getActivityPattern(organizationId, competitor.id, days, now),
+        getRepeatedPriceChangePatterns(organizationId, competitor.id, days, now),
+      ]);
+      const events = eventsByCompetitor.get(competitor.id) ?? [];
+      const items: DigestItem[] = [];
+
+      // 1. Raw verified changes - always eligible, no qualification gate.
+      for (const event of events) {
+        items.push({
+          kind: "CHANGE_EVENT",
+          competitorId: competitor.id,
+          competitorName: competitor.name,
+          detectedAt: event.detectedAt,
+          changeEventIds: [event.id],
+          changeEventId: event.id,
+          changeType: event.changeType,
+          severity: event.severity,
+          description: describeChangeEvent(event),
+        });
+      }
+
+      // 2. Qualifying repeated price-change patterns - reused verbatim, changeCount >= 2 only.
+      for (const pattern of repeatedPricePatterns) {
+        if (!pattern.qualifies) continue;
+        items.push({
+          kind: "REPEATED_PRICE_CHANGE",
+          competitorId: competitor.id,
+          competitorName: competitor.name,
+          // qualifies implies changeCount >= 2, so lastChangeAt is always set.
+          detectedAt: pattern.lastChangeAt ?? window.currentEnd,
+          changeEventIds: pattern.changeEventIds,
+          pattern,
+        });
+      }
+
+      // 3. Qualifying activity-vs-own-baseline pattern - ONLY when it qualifies
+      // AND there is at least one real ChangeEvent in the current window to
+      // cite as evidence (a qualifying pattern with zero current-window
+      // events - e.g. AT_BASELINE with both sides 0 - would have no
+      // ChangeEvent to point to, and Section 15 forbids an unsupported
+      // item; the raw activity is fully described by (1) above in that case).
+      if (activityPattern.qualifies && events.length > 0) {
+        items.push({
+          kind: "ACTIVITY_PATTERN",
+          competitorId: competitor.id,
+          competitorName: competitor.name,
+          detectedAt: events[0]!.detectedAt, // events are already sorted desc by the bulk query
+          changeEventIds: events.map((e) => e.id),
+          pattern: activityPattern,
+        });
+      }
+
+      // 4. Lifecycle roll-up - only when something was actually added/removed
+      // in this window (derived from the same `events`, see the function
+      // doc comment above for why this is not a second getProductLifecycleSummary call).
+      const addedEvents = events.filter((e) => e.changeType === "PRODUCT_ADDED");
+      const removedEvents = events.filter((e) => e.changeType === "PRODUCT_REMOVED");
+      if (addedEvents.length > 0 || removedEvents.length > 0) {
+        const lifecycleEvents = [...addedEvents, ...removedEvents];
+        items.push({
+          kind: "LIFECYCLE",
+          competitorId: competitor.id,
+          competitorName: competitor.name,
+          detectedAt: lifecycleEvents.reduce((max, e) => (e.detectedAt > max ? e.detectedAt : max), lifecycleEvents[0]!.detectedAt),
+          changeEventIds: lifecycleEvents.map((e) => e.id),
+          added: addedEvents.length,
+          removed: removedEvents.length,
+        });
+      }
+
+      return { competitorId: competitor.id, activityPattern, items };
+    }),
+  );
+
+  const items = perCompetitorResults.flatMap((r) => r.items).sort(compareDigestItems);
+  const aboveBaselineCount = perCompetitorResults.filter((r) => r.activityPattern.direction === "ABOVE_BASELINE").length;
+
+  return {
+    days,
+    timezone: window.timezone,
+    windowStart: window.currentStart,
+    windowEnd: window.currentEnd,
+    totalTrackedCompetitors: competitors.length,
+    items,
+    crossCompetitorContext: { aboveBaselineCount, totalTrackedCompetitors: competitors.length },
+  };
 }
