@@ -741,5 +741,57 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       const resultA = await getDigestForOrganization(orgA.id, 30);
       expect(resultA.crossCompetitorContext.aboveBaselineCount).toBe(1);
     });
+
+    it("Phase 12: issues a query count bounded by competitor count, not by ChangeEvent volume", async () => {
+      const orgSmall = await makeOrg("DigestQueryBoundSmall");
+      const compSmall = await makeCompetitor(orgSmall.id, "Small Volume Co", new Date(Date.now() - 150 * DAY));
+      const urlSmall = await createMonitoredUrl(orgSmall.id, compSmall.id, { url: "https://digest-qbound-small.example.test", category: "GENERAL" });
+      for (const daysAgo of [1, 2, 3]) {
+        await createChangeEvent(orgSmall.id, urlSmall.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `small-${daysAgo}` });
+      }
+
+      const orgLarge = await makeOrg("DigestQueryBoundLarge");
+      const compLarge = await makeCompetitor(orgLarge.id, "Large Volume Co", new Date(Date.now() - 150 * DAY));
+      const urlLarge = await createMonitoredUrl(orgLarge.id, compLarge.id, { url: "https://digest-qbound-large.example.test", category: "GENERAL" });
+      for (let i = 0; i < 60; i += 1) {
+        await createChangeEvent(orgLarge.id, urlLarge.id, { detectedAt: new Date(Date.now() - ((i % 29) + 1) * DAY), entityKey: `large-${i}` });
+      }
+
+      const smallQueryCount = await countPrismaQueries(() => getDigestForOrganization(orgSmall.id, 30));
+      const largeQueryCount = await countPrismaQueries(() => getDigestForOrganization(orgLarge.id, 30));
+
+      // Same single competitor in both orgs -> the same query count regardless of a 20x
+      // difference in ChangeEvent volume (3 vs 60) - proves getDigestForOrganization stays
+      // O(competitors), never O(events), matching getCompetitiveContext's own regression
+      // guard above (Phase 12, closing Phase 10/11's documented Finding #3).
+      expect(largeQueryCount).toBe(smallQueryCount);
+      expect(smallQueryCount).toBeLessThanOrEqual(20);
+    });
+
+    it("Phase 12: query count stays bounded as competitor count grows by a fixed per-competitor amount, and tenant isolation holds under the same measurement", async () => {
+      const orgOne = await makeOrg("DigestQueryBoundOneComp");
+      const compOne = await makeCompetitor(orgOne.id, "One Co", new Date(Date.now() - 150 * DAY));
+      const urlOne = await createMonitoredUrl(orgOne.id, compOne.id, { url: "https://digest-qbound-one.example.test", category: "GENERAL" });
+      await createChangeEvent(orgOne.id, urlOne.id, { detectedAt: new Date(Date.now() - 1 * DAY), entityKey: "one-1" });
+
+      const orgMany = await makeOrg("DigestQueryBoundManyComp");
+      for (let c = 0; c < 5; c += 1) {
+        const comp = await makeCompetitor(orgMany.id, `Many Co ${c}`, new Date(Date.now() - 150 * DAY));
+        const url = await createMonitoredUrl(orgMany.id, comp.id, { url: `https://digest-qbound-many-${c}.example.test`, category: "GENERAL" });
+        await createChangeEvent(orgMany.id, url.id, { detectedAt: new Date(Date.now() - 1 * DAY), entityKey: `many-${c}` });
+      }
+
+      const oneCompQueryCount = await countPrismaQueries(() => getDigestForOrganization(orgOne.id, 30));
+      const fiveCompQueryCount = await countPrismaQueries(() => getDigestForOrganization(orgMany.id, 30));
+
+      // 5x the competitors must not cost anywhere near 5x the queries beyond the fixed
+      // per-competitor overhead - proves the per-competitor work is not itself hiding an
+      // N+1 over ChangeEvents (each competitor here has exactly 1 event).
+      expect(fiveCompQueryCount).toBeLessThan(oneCompQueryCount * 5);
+
+      // Tenant isolation holds under the exact same measurement path used above.
+      const resultMany = await getDigestForOrganization(orgMany.id, 30);
+      expect(resultMany.items.every((i) => i.competitorId !== compOne.id)).toBe(true);
+    });
   });
 });

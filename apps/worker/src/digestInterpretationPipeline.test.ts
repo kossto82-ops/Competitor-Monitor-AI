@@ -164,6 +164,23 @@ describe("runDigestInterpretationJob", () => {
     expect(deps.markDigestAiInterpretationFailed).toHaveBeenCalledWith("interp-1", expect.stringContaining("not present in the supplied evidence bundle"));
   });
 
+  it("Phase 12: marks FAILED when the provider returns output with valid evidence ids but a prohibited unsupported-claim phrase", async () => {
+    const provider = createFakeAiProvider({
+      respondDigest: () =>
+        JSON.stringify({
+          summary: "x",
+          observations: [],
+          interpretations: [{ text: "This may indicate a response to market demand.", evidenceChangeEventIds: ["ce-1", "ce-2"] }],
+          hypotheses: [],
+        }),
+    });
+    const deps = makeDeps({ resolveProvider: vi.fn().mockResolvedValue(resolvedFrom(provider)) });
+
+    const result = await runDigestInterpretationJob(PAYLOAD, deps);
+    expect(result.status).toBe("FAILED");
+    expect(deps.markDigestAiInterpretationFailed).toHaveBeenCalledWith("interp-1", expect.stringContaining("prohibited unsupported-claim phrase"));
+  });
+
   it("makes at most 2 provider calls total (1 + at most 1 internal retry) even on repeated transient failure", async () => {
     const provider = createFakeAiProvider({ throwErrorDigest: () => new AiProviderTimeoutError("fake", 30_000), failFirstNDigestCalls: 99 });
     const deps = makeDeps({ resolveProvider: vi.fn().mockResolvedValue(resolvedFrom(provider)) });

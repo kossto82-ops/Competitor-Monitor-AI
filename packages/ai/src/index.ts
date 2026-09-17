@@ -37,5 +37,6 @@ export * from "./digestSchema.js";
 export * from "./buildDigestContext.js";
 export * from "./digestPrompt.js";
 export * from "./validateDigestInterpretation.js";
+export * from "./validateDigestClaimSafety.js";
 export * from "./interpretDigestWithRetry.js";
 export * from "./analyzeAndValidateDigest.js";
