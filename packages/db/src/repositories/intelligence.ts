@@ -18,7 +18,14 @@
 import { calculatePeriodDelta, describeChangeEvent, resolveComparisonWindow, type PeriodDelta } from "@cma/core";
 import type { ChangeType, Severity } from "../../generated/client/index.js";
 import { prisma } from "../client.js";
-import { getActivityPattern, getRepeatedPriceChangePatterns, type ActivityPattern, type RepeatedPriceChangePattern } from "./patterns.js";
+import {
+  getActivityPattern,
+  getRepeatedPriceChangePatterns,
+  getSustainedActivityTrend,
+  type ActivityPattern,
+  type RepeatedPriceChangePattern,
+  type SustainedActivityTrend,
+} from "./patterns.js";
 
 const CHANGE_TYPES: ChangeType[] = ["PRICE_CHANGE", "PRODUCT_ADDED", "PRODUCT_REMOVED", "PROMOTION_CHANGE", "CONTENT_CHANGE"];
 
@@ -393,17 +400,18 @@ export async function getCompetitiveContext(
 // ---------------------------------------------------------------------------
 // Phase 10: Deterministic Digest - a per-organization, evidence-linked
 // composition of already-existing facts (ChangeEvent, ActivityPattern,
-// RepeatedPriceChangePattern) across every actively-tracked competitor. See
-// PHASE10-VALIDATION-REPORT.md and PHASE9-PRODUCT-DIRECTION-AUDIT.md Section
-// 14 for why this is pure composition, not a new tier of intelligence:
-// every field below is either a direct ChangeEvent column or an
-// already-tested Phase 7 pattern object, reused verbatim. There is NO new
-// baseline formula, NO importance/relevance score, and NO AI call anywhere
-// in this function.
+// RepeatedPriceChangePattern, and - since Phase 16 - SustainedActivityTrend)
+// across every actively-tracked competitor. See PHASE10-VALIDATION-REPORT.md,
+// PHASE9-PRODUCT-DIRECTION-AUDIT.md Section 14, and
+// PHASE15-INTELLIGENCE-VALUE-AUDIT.md Section 16 for why this is pure
+// composition, not a new tier of intelligence: every field below is either a
+// direct ChangeEvent column or an already-tested Phase 7/14B pattern object,
+// reused verbatim. There is NO new baseline formula, NO importance/relevance
+// score, and NO AI call anywhere in this function.
 // ---------------------------------------------------------------------------
 
 /** Fixed, documented tie-break order for items sharing the same `detectedAt` - never a hidden importance ranking, just a stable sort key. */
-const DIGEST_ITEM_KIND_ORDER = ["CHANGE_EVENT", "REPEATED_PRICE_CHANGE", "ACTIVITY_PATTERN", "LIFECYCLE"] as const;
+const DIGEST_ITEM_KIND_ORDER = ["CHANGE_EVENT", "REPEATED_PRICE_CHANGE", "ACTIVITY_PATTERN", "SUSTAINED_ACTIVITY_TREND", "LIFECYCLE"] as const;
 export type DigestItemKind = (typeof DIGEST_ITEM_KIND_ORDER)[number];
 
 interface DigestItemCommon {
@@ -437,6 +445,23 @@ export interface ActivityPatternDigestItem extends DigestItemCommon {
   pattern: ActivityPattern;
 }
 
+/**
+ * Phase 16: a sustained (consecutiveQualifyingWindows >= 2), multi-window
+ * activity-vs-own-baseline trend - see PHASE15-INTELLIGENCE-VALUE-AUDIT.md
+ * Section 16/9.4 for why this carries only these two already-computed,
+ * independently-reconstructible-from-`lookback` numbers/enums (never a new
+ * score) and PHASE14B-VALIDATION-REPORT.md for `getSustainedActivityTrend`
+ * itself, reused verbatim and UNMODIFIED. `direction` is never `AT_BASELINE`
+ * or `INSUFFICIENT_HISTORY` here - a sustained streak requires offset-0
+ * itself to `qualify` with a non-neutral direction (see
+ * getSustainedActivityTrend's own doc comment).
+ */
+export interface SustainedActivityTrendDigestItem extends DigestItemCommon {
+  kind: "SUSTAINED_ACTIVITY_TREND";
+  consecutiveQualifyingWindows: number;
+  direction: "ABOVE_BASELINE" | "BELOW_BASELINE";
+}
+
 /** A deterministic added/removed roll-up for this competitor within the digest window, derived from the same raw ChangeEvents already fetched for the CHANGE_EVENT items above (see the function doc comment for why this is NOT a second call to getProductLifecycleSummary). */
 export interface LifecycleDigestItem extends DigestItemCommon {
   kind: "LIFECYCLE";
@@ -444,11 +469,18 @@ export interface LifecycleDigestItem extends DigestItemCommon {
   removed: number;
 }
 
-export type DigestItem = ChangeEventDigestItem | RepeatedPriceChangeDigestItem | ActivityPatternDigestItem | LifecycleDigestItem;
+export type DigestItem =
+  | ChangeEventDigestItem
+  | RepeatedPriceChangeDigestItem
+  | ActivityPatternDigestItem
+  | SustainedActivityTrendDigestItem
+  | LifecycleDigestItem;
 
 export interface DigestCrossCompetitorContext {
   /** Count of tracked competitors whose ActivityPattern.direction is currently ABOVE_BASELINE (implies qualifies === true - see patterns.ts). Purely descriptive counting, never a causal/coordination claim - see PHASE9-PRODUCT-DIRECTION-AUDIT.md Section 9. */
   aboveBaselineCount: number;
+  /** Phase 16: count of tracked competitors whose SustainedActivityTrend.sustained is currently true - the identical `.filter().length` shape as aboveBaselineCount, applied to the persistence signal instead of a single-window snapshot. Purely descriptive counting, never a ranking. */
+  sustainedCount: number;
   /** Total actively-tracked competitors for this organization, regardless of whether their own pattern qualifies yet. */
   totalTrackedCompetitors: number;
 }
@@ -472,6 +504,8 @@ function digestItemStableId(item: DigestItem): string {
       return `${item.pattern.monitoredUrlId}::${item.pattern.entityKey}`;
     case "ACTIVITY_PATTERN":
       return `activity::${item.competitorId}`;
+    case "SUSTAINED_ACTIVITY_TREND":
+      return `sustained::${item.competitorId}`;
     case "LIFECYCLE":
       return `lifecycle::${item.competitorId}`;
   }
@@ -613,7 +647,7 @@ export async function getDigestForOrganization(
     windowEnd: window.currentEnd,
     totalTrackedCompetitors: 0,
     items: [],
-    crossCompetitorContext: { aboveBaselineCount: 0, totalTrackedCompetitors: 0 },
+    crossCompetitorContext: { aboveBaselineCount: 0, sustainedCount: 0, totalTrackedCompetitors: 0 },
   };
   if (competitors.length === 0) return emptyResult;
 
@@ -630,9 +664,10 @@ export async function getDigestForOrganization(
 
   const perCompetitorResults = await Promise.all(
     competitors.map(async (competitor) => {
-      const [activityPattern, repeatedPricePatterns] = await Promise.all([
+      const [activityPattern, repeatedPricePatterns, sustainedActivityTrend] = await Promise.all([
         getActivityPattern(organizationId, competitor.id, days, now),
         getRepeatedPriceChangePatterns(organizationId, competitor.id, days, now),
+        getSustainedActivityTrend(organizationId, competitor.id, days, now),
       ]);
       const events = eventsByCompetitor.get(competitor.id) ?? [];
       const items: DigestItem[] = [];
@@ -683,6 +718,31 @@ export async function getDigestForOrganization(
         });
       }
 
+      // 3.5. Sustained multi-window activity trend (Phase 16) - reuses the
+      // already-computed, unmodified getSustainedActivityTrend verbatim
+      // (Phase 14B). Gated on `sustained === true` (mirroring every other
+      // item's own qualification gate) AND at least one real ChangeEvent in
+      // the current window to cite as evidence - same dual-condition
+      // rationale as the ACTIVITY_PATTERN gate above: a sustained
+      // BELOW_BASELINE streak can have `current.current === 0` (fewer
+      // changes than baseline can legitimately mean zero), which would
+      // leave no ChangeEvent to point to - see PHASE15-INTELLIGENCE-VALUE-AUDIT.md
+      // Section 9.5 / PHASE16 brief Section 12 (never an empty evidence list).
+      if (sustainedActivityTrend.sustained && events.length > 0) {
+        items.push({
+          kind: "SUSTAINED_ACTIVITY_TREND",
+          competitorId: competitor.id,
+          competitorName: competitor.name,
+          detectedAt: events[0]!.detectedAt, // events are already sorted desc by the bulk query
+          changeEventIds: events.map((e) => e.id),
+          consecutiveQualifyingWindows: sustainedActivityTrend.consecutiveQualifyingWindows,
+          // sustained === true guarantees offset-0's own direction is non-neutral (see
+          // getSustainedActivityTrend's doc comment: AT_BASELINE always breaks the streak at
+          // offset-0) - same narrowing convention as SustainedTrendCard.tsx.
+          direction: sustainedActivityTrend.current.direction === "BELOW_BASELINE" ? "BELOW_BASELINE" : "ABOVE_BASELINE",
+        });
+      }
+
       // 4. Lifecycle roll-up - only when something was actually added/removed
       // in this window (derived from the same `events`, see the function
       // doc comment above for why this is not a second getProductLifecycleSummary call).
@@ -701,12 +761,13 @@ export async function getDigestForOrganization(
         });
       }
 
-      return { competitorId: competitor.id, activityPattern, items };
+      return { competitorId: competitor.id, activityPattern, sustainedActivityTrend, items };
     }),
   );
 
   const items = perCompetitorResults.flatMap((r) => r.items).sort(compareDigestItems);
   const aboveBaselineCount = perCompetitorResults.filter((r) => r.activityPattern.direction === "ABOVE_BASELINE").length;
+  const sustainedCount = perCompetitorResults.filter((r) => r.sustainedActivityTrend.sustained).length;
 
   return {
     days,
@@ -715,6 +776,6 @@ export async function getDigestForOrganization(
     windowEnd: window.currentEnd,
     totalTrackedCompetitors: competitors.length,
     items,
-    crossCompetitorContext: { aboveBaselineCount, totalTrackedCompetitors: competitors.length },
+    crossCompetitorContext: { aboveBaselineCount, sustainedCount, totalTrackedCompetitors: competitors.length },
   };
 }

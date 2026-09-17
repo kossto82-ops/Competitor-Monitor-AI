@@ -160,6 +160,107 @@ test.describe("Deterministic Digest (Phase 10)", () => {
     await expect(page.getByTestId("digest-cross-competitor-context")).toContainText("1 of 2");
   });
 
+  test("8 - sustained activity trend: a competitor with a genuine 3-consecutive-window streak renders the SUSTAINED_ACTIVITY_TREND item", async ({ page }) => {
+    const suffix = Date.now();
+    const org = makeTestOrg("DigestSustainedTrue");
+    await signup(page, org);
+
+    const competitorName = `Digest Sustained True Co ${suffix}`;
+    const id = await setUpCompetitorInOrg(page, competitorName, `digest-sustained-true-${suffix}`);
+    // Same empirically-verified fixture as sustained-trend.spec.ts Scenario A: current [0,30) 2
+    // events, [30,60) 1 event, [60,90) 1 event, tracked 160 days -> sustained: true,
+    // consecutiveQualifyingWindows: 3, direction: ABOVE_BASELINE.
+    seedPatternEvents(id, [{ detectedAtDaysAgo: 5 }, { detectedAtDaysAgo: 5 }, { detectedAtDaysAgo: 35 }, { detectedAtDaysAgo: 65 }], 160);
+
+    await page.goto("/digest?days=30");
+
+    const sustainedItem = page.locator('[data-testid="digest-item"][data-digest-kind="SUSTAINED_ACTIVITY_TREND"]');
+    await expect(sustainedItem).toHaveCount(1);
+    await expect(sustainedItem.getByTestId("digest-sustained-direction-badge")).toHaveText("Above baseline");
+    await expect(sustainedItem).toContainText("Sustained for 3 consecutive tracked periods");
+
+    await sustainedItem.getByTestId("digest-evidence-link").click();
+    await expect(page).toHaveURL(/\/changes\//);
+    await expect(page.getByText("This is evidence, not an inference")).toBeVisible();
+  });
+
+  test("9 - sustained activity trend: absent (never fabricated) when there is insufficient tracked history to evaluate a prior offset", async ({ page }) => {
+    const suffix = Date.now();
+    const org = makeTestOrg("DigestSustainedInsufficient");
+    await signup(page, org);
+
+    const competitorName = `Digest Sustained Insufficient Co ${suffix}`;
+    const id = await setUpCompetitorInOrg(page, competitorName, `digest-sustained-insufficient-${suffix}`);
+    // Scenario B from sustained-trend.spec.ts: current qualifies (>=90 days), but only 100 days
+    // tracked - short of the 120-day floor a 2-window sustained claim needs.
+    seedPatternEvents(id, [{ detectedAtDaysAgo: 5 }], 100);
+
+    await page.goto("/digest?days=30");
+
+    await expect(page.locator('[data-testid="digest-item"][data-digest-kind="SUSTAINED_ACTIVITY_TREND"]')).toHaveCount(0);
+    // The current window's ACTIVITY_PATTERN still qualifies and is still shown - only the
+    // sustained composition is correctly absent.
+    await expect(page.locator('[data-testid="digest-item"][data-digest-kind="ACTIVITY_PATTERN"]')).toHaveCount(1);
+  });
+
+  test("10 - sustained activity trend: absent (never fabricated) when the immediately preceding period reverses the current direction", async ({ page }) => {
+    const suffix = Date.now();
+    const org = makeTestOrg("DigestSustainedReversal");
+    await signup(page, org);
+
+    const competitorName = `Digest Sustained Reversal Co ${suffix}`;
+    const id = await setUpCompetitorInOrg(page, competitorName, `digest-sustained-reversal-${suffix}`);
+    // Scenario C from sustained-trend.spec.ts: current ABOVE_BASELINE, immediately preceding
+    // offset reverses to BELOW_BASELINE - a genuine reversal, not "not enough history".
+    seedPatternEvents(
+      id,
+      [
+        { detectedAtDaysAgo: 5 },
+        { detectedAtDaysAgo: 5 },
+        { detectedAtDaysAgo: 5 },
+        { detectedAtDaysAgo: 5 },
+        { detectedAtDaysAgo: 5 },
+        { detectedAtDaysAgo: 35 },
+        { detectedAtDaysAgo: 65 },
+        { detectedAtDaysAgo: 65 },
+        { detectedAtDaysAgo: 65 },
+        { detectedAtDaysAgo: 65 },
+        { detectedAtDaysAgo: 95 },
+        { detectedAtDaysAgo: 95 },
+        { detectedAtDaysAgo: 95 },
+        { detectedAtDaysAgo: 95 },
+        { detectedAtDaysAgo: 125 },
+        { detectedAtDaysAgo: 125 },
+        { detectedAtDaysAgo: 125 },
+        { detectedAtDaysAgo: 125 },
+      ],
+      200,
+    );
+
+    await page.goto("/digest?days=30");
+
+    await expect(page.locator('[data-testid="digest-item"][data-digest-kind="SUSTAINED_ACTIVITY_TREND"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="digest-item"][data-digest-kind="ACTIVITY_PATTERN"]')).toHaveCount(1);
+  });
+
+  test("11 - sustained activity trend: mobile - the SUSTAINED_ACTIVITY_TREND item introduces no new document-level horizontal overflow at 375px", async ({ page }) => {
+    const suffix = Date.now();
+    const org = makeTestOrg("DigestSustainedMobile");
+    await signup(page, org);
+
+    const id = await setUpCompetitorInOrg(page, `Digest Sustained Mobile Co ${suffix}`, `digest-sustained-mobile-${suffix}`);
+    seedPatternEvents(id, [{ detectedAtDaysAgo: 5 }, { detectedAtDaysAgo: 5 }, { detectedAtDaysAgo: 35 }, { detectedAtDaysAgo: 65 }], 160);
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/digest?days=30");
+
+    const sustainedItem = page.locator('[data-testid="digest-item"][data-digest-kind="SUSTAINED_ACTIVITY_TREND"]');
+    await expect(sustainedItem).toBeVisible();
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(overflow).toBe(false);
+  });
+
   test("6 - tenant isolation: organization B never sees organization A's digest items, competitors, or evidence", async ({ browser }) => {
     const suffix = Date.now();
     const orgA = makeTestOrg("DigestIsoA");

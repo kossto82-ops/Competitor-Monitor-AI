@@ -38,6 +38,19 @@ function activityPatternItem(overrides: Partial<DigestItemForInterpretation> = {
   };
 }
 
+function sustainedActivityTrendItem(overrides: Partial<DigestItemForInterpretation> = {}): DigestItemForInterpretation {
+  return {
+    kind: "SUSTAINED_ACTIVITY_TREND",
+    competitorId: "comp-1",
+    competitorName: "Competitor One",
+    detectedAt: WINDOW_END,
+    changeEventIds: ["ce-1", "ce-2"],
+    consecutiveQualifyingWindows: 3,
+    direction: "ABOVE_BASELINE",
+    ...overrides,
+  };
+}
+
 function makeDigest(items: DigestItemForInterpretation[], overrides: Partial<DigestForInterpretation> = {}): DigestForInterpretation {
   return {
     days: 30,
@@ -118,6 +131,43 @@ describe("buildDigestInterpretationInput", () => {
 
     expect(bundle.competitors).toEqual([]);
     expect(bundle.allowedEvidenceChangeEventIds).toEqual([]);
+  });
+
+  it("Phase 16: a SUSTAINED_ACTIVITY_TREND item's facts carry the deterministic numbers verbatim, never a re-derived value", () => {
+    const digest = makeDigest([sustainedActivityTrendItem()]);
+    const bundle = buildDigestInterpretationInput(digest);
+
+    const item = bundle.competitors[0]!.items[0]!;
+    expect(item.kind).toBe("SUSTAINED_ACTIVITY_TREND");
+    expect(item.facts).toEqual({ kind: "SUSTAINED_ACTIVITY_TREND", consecutiveQualifyingWindows: 3, direction: "ABOVE_BASELINE" });
+    expect(item.evidenceChangeEventIds).toEqual(["ce-1", "ce-2"]);
+  });
+
+  it("Phase 16: a SUSTAINED_ACTIVITY_TREND item is never dropped by the per-competitor CHANGE_EVENT cap - it is a qualified pattern item, same as ACTIVITY_PATTERN/REPEATED_PRICE_CHANGE", () => {
+    const rawEvents = Array.from({ length: MAX_RAW_CHANGE_EVENTS_PER_COMPETITOR + 5 }, (_, i) =>
+      changeEventItem({ changeEventId: `ce-raw-${i}`, changeEventIds: [`ce-raw-${i}`] }),
+    );
+    const digest = makeDigest([...rawEvents, sustainedActivityTrendItem({ changeEventIds: ["ce-raw-0", "ce-raw-1"] })]);
+    const bundle = buildDigestInterpretationInput(digest);
+
+    const kinds = bundle.competitors[0]!.items.map((i) => i.kind);
+    expect(kinds.filter((k) => k === "CHANGE_EVENT")).toHaveLength(MAX_RAW_CHANGE_EVENTS_PER_COMPETITOR);
+    expect(kinds.filter((k) => k === "SUSTAINED_ACTIVITY_TREND")).toHaveLength(1);
+  });
+
+  it("Phase 16: a SUSTAINED_ACTIVITY_TREND item never carries an empty evidenceChangeEventIds list", () => {
+    const digest = makeDigest([sustainedActivityTrendItem()]);
+    const bundle = buildDigestInterpretationInput(digest);
+    expect(bundle.competitors[0]!.items[0]!.evidenceChangeEventIds.length).toBeGreaterThan(0);
+  });
+
+  it("Phase 16: the existing four item kinds' facts/evidence are unaffected by the new SUSTAINED_ACTIVITY_TREND kind", () => {
+    const digest = makeDigest([changeEventItem(), activityPatternItem({ changeEventIds: ["ce-3"] })]);
+    const bundle = buildDigestInterpretationInput(digest);
+    const kinds = bundle.competitors[0]!.items.map((i) => i.kind);
+    expect(kinds).toEqual(["ACTIVITY_PATTERN", "CHANGE_EVENT"]);
+    expect(bundle.competitors[0]!.items.find((i) => i.kind === "ACTIVITY_PATTERN")!.facts["direction"]).toBe("ABOVE_BASELINE");
+    expect(bundle.competitors[0]!.items.find((i) => i.kind === "CHANGE_EVENT")!.facts["changeType"]).toBe("PRICE_CHANGE");
   });
 
   it("page-derived text (a pattern's entity label) is kept out of `facts` and only ever placed in `untrustedText`", () => {

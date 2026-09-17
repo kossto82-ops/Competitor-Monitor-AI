@@ -10,7 +10,7 @@
  * as-is by callers in packages/db and apps/worker.
  */
 export interface DigestItemForInterpretation {
-  kind: "CHANGE_EVENT" | "REPEATED_PRICE_CHANGE" | "ACTIVITY_PATTERN" | "LIFECYCLE";
+  kind: "CHANGE_EVENT" | "REPEATED_PRICE_CHANGE" | "ACTIVITY_PATTERN" | "SUSTAINED_ACTIVITY_TREND" | "LIFECYCLE";
   competitorId: string;
   competitorName: string;
   detectedAt: Date | string;
@@ -46,6 +46,15 @@ export interface DigestItemForInterpretation {
     // shared
     days?: number;
   };
+
+  // SUSTAINED_ACTIVITY_TREND (Phase 16) - additive, optional fields exactly
+  // as pre-specified by PHASE14A-HISTORICAL-INTELLIGENCE-DESIGN-AUDIT.md
+  // Section 12 and confirmed by PHASE15-INTELLIGENCE-VALUE-AUDIT.md Section
+  // 16 item 5: no new claim-safety category, no new evidence type - just
+  // these two deterministic numbers/enums, both independently
+  // reconstructible from @cma/db's SustainedActivityTrend.lookback.
+  consecutiveQualifyingWindows?: number;
+  direction?: "ABOVE_BASELINE" | "BELOW_BASELINE";
 
   // LIFECYCLE
   added?: number;

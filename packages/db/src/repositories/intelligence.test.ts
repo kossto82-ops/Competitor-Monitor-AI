@@ -13,6 +13,7 @@ import {
   getProductLifecycleSummary,
   type ChangeEventDigestItem,
   type LifecycleDigestItem,
+  type SustainedActivityTrendDigestItem,
 } from "./intelligence.js";
 import type { ChangeType } from "../../generated/client/index.js";
 
@@ -536,7 +537,7 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       const result = await getDigestForOrganization(org.id, 30);
       expect(result.items).toEqual([]);
       expect(result.totalTrackedCompetitors).toBe(0);
-      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 0, totalTrackedCompetitors: 0 });
+      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 0, sustainedCount: 0, totalTrackedCompetitors: 0 });
     });
 
     it("returns an empty digest for an organization with competitors but zero ChangeEvents", async () => {
@@ -564,7 +565,7 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       }
       // No pattern item yet - the competitor was created today, so getActivityPattern is INSUFFICIENT_HISTORY.
       expect(result.items.some((i) => i.kind === "ACTIVITY_PATTERN")).toBe(false);
-      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 0, totalTrackedCompetitors: 1 });
+      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 0, sustainedCount: 0, totalTrackedCompetitors: 1 });
     });
 
     it("includes an ACTIVITY_PATTERN item only once the pattern qualifies, with real evidence event ids", async () => {
@@ -589,7 +590,11 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       expect(patternItem.pattern.qualifies).toBe(true);
       expect(patternItem.pattern.direction).toBe("ABOVE_BASELINE");
       expect(patternItem.changeEventIds).toHaveLength(4); // exactly the 4 current-window events, never the baseline ones
-      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 1, totalTrackedCompetitors: 1 });
+      // This fixture's baseline/current spacing also happens to hold ABOVE_BASELINE across all 3
+      // sustained-trend offsets (Phase 16) - sustainedCount: 1 here is incidental to this specific
+      // fixture, not something this test is asserting about; the dedicated SUSTAINED_ACTIVITY_TREND
+      // describe block below is the source of truth for that behavior.
+      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 1, sustainedCount: 1, totalTrackedCompetitors: 1 });
     });
 
     it("includes a REPEATED_PRICE_CHANGE item only for entities meeting the qualifying threshold (>= 2 price changes)", async () => {
@@ -655,7 +660,9 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
 
       const result = await getDigestForOrganization(org.id, 30);
       // 1 of 2 tracked competitors (fresh cannot qualify) is currently ABOVE_BASELINE.
-      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 1, totalTrackedCompetitors: 2 });
+      // Same fixture as the ACTIVITY_PATTERN test above, so sustainedCount: 1 for the same
+      // incidental reason (see that test's comment) - not the focus of this assertion.
+      expect(result.crossCompetitorContext).toEqual({ aboveBaselineCount: 1, sustainedCount: 1, totalTrackedCompetitors: 2 });
     });
 
     it("excludes a deactivated (isActive: false) competitor from the tracked set entirely", async () => {
@@ -765,7 +772,11 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       // O(competitors), never O(events), matching getCompetitiveContext's own regression
       // guard above (Phase 12, closing Phase 10/11's documented Finding #3).
       expect(largeQueryCount).toBe(smallQueryCount);
-      expect(smallQueryCount).toBeLessThanOrEqual(20);
+      // Phase 16 raised this bound (was 20) after adding getSustainedActivityTrend
+      // (unmodified, <= 18 Prisma calls per its own Phase 14B invariant) to the per-competitor
+      // Promise.all - measured directly at 23 for this single-competitor fixture; the important
+      // invariant (O(competitors), never O(events), asserted immediately above) is unaffected.
+      expect(smallQueryCount).toBeLessThanOrEqual(26);
     });
 
     it("Phase 12: query count stays bounded as competitor count grows by a fixed per-competitor amount, and tenant isolation holds under the same measurement", async () => {
@@ -792,6 +803,136 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       // Tenant isolation holds under the exact same measurement path used above.
       const resultMany = await getDigestForOrganization(orgMany.id, 30);
       expect(resultMany.items.every((i) => i.competitorId !== compOne.id)).toBe(true);
+    });
+
+    describe("SUSTAINED_ACTIVITY_TREND item (Phase 16)", () => {
+      /**
+       * The exact, empirically-verified fixture from sustained-trend.spec.ts
+       * (Scenario A): current [0,30) 2 events, [30,60) 1 event, [60,90) 1
+       * event, tracked 160 days - produces `sustained: true`,
+       * `consecutiveQualifyingWindows: 3`, `direction: ABOVE_BASELINE`.
+       * Reused verbatim rather than re-derived, to avoid duplicating
+       * Phase 14B's already-validated boundary arithmetic.
+       */
+      async function seedSustainedTrue(org: { id: string }, competitorName: string, urlSlug: string) {
+        const comp = await makeCompetitor(org.id, competitorName, new Date(Date.now() - 160 * DAY));
+        const url = await createMonitoredUrl(org.id, comp.id, { url: `https://${urlSlug}.example.test`, category: "GENERAL" });
+        for (const daysAgo of [5, 5]) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `sust-cur-${Math.random()}` });
+        }
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - 35 * DAY), entityKey: "sust-mid" });
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - 65 * DAY), entityKey: "sust-far" });
+        return comp;
+      }
+
+      /** Scenario B from sustained-trend.spec.ts: current qualifies, but not enough tracked history to check the prior offset (100 days tracked). */
+      async function seedInsufficientSustainedHistory(org: { id: string }, competitorName: string, urlSlug: string) {
+        const comp = await makeCompetitor(org.id, competitorName, new Date(Date.now() - 100 * DAY));
+        const url = await createMonitoredUrl(org.id, comp.id, { url: `https://${urlSlug}.example.test`, category: "GENERAL" });
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - 5 * DAY), entityKey: "insuff-cur" });
+        return comp;
+      }
+
+      /** Scenario C from sustained-trend.spec.ts: current ABOVE_BASELINE, immediately preceding offset reverses to BELOW_BASELINE. */
+      async function seedReversal(org: { id: string }, competitorName: string, urlSlug: string) {
+        const comp = await makeCompetitor(org.id, competitorName, new Date(Date.now() - 200 * DAY));
+        const url = await createMonitoredUrl(org.id, comp.id, { url: `https://${urlSlug}.example.test`, category: "GENERAL" });
+        for (const daysAgo of [5, 5, 5, 5, 5]) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `rev-cur-${Math.random()}` });
+        }
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - 35 * DAY), entityKey: "rev-mid" });
+        for (const daysAgo of [65, 65, 65, 65]) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `rev-far1-${Math.random()}` });
+        }
+        for (const daysAgo of [95, 95, 95, 95]) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `rev-far2-${Math.random()}` });
+        }
+        for (const daysAgo of [125, 125, 125, 125]) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `rev-far3-${Math.random()}` });
+        }
+        return comp;
+      }
+
+      it("includes a SUSTAINED_ACTIVITY_TREND item, with the direction and consecutive-window count, when sustained === true", async () => {
+        const org = await makeOrg("DigestSustainedTrue");
+        await seedSustainedTrue(org, "Sustained True Co", "digest-sustained-true");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        const sustainedItems = result.items.filter((i): i is SustainedActivityTrendDigestItem => i.kind === "SUSTAINED_ACTIVITY_TREND");
+        expect(sustainedItems).toHaveLength(1);
+        expect(sustainedItems[0]!.direction).toBe("ABOVE_BASELINE");
+        expect(sustainedItems[0]!.consecutiveQualifyingWindows).toBe(3);
+      });
+
+      it("does NOT include a SUSTAINED_ACTIVITY_TREND item when sustained === false (reversal against the immediately preceding period)", async () => {
+        const org = await makeOrg("DigestSustainedReversal");
+        await seedReversal(org, "Sustained Reversal Co", "digest-sustained-reversal");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        expect(result.items.some((i) => i.kind === "SUSTAINED_ACTIVITY_TREND")).toBe(false);
+        // The current window's ACTIVITY_PATTERN still qualifies and is still shown - only the
+        // sustained composition is absent, never silently downgraded into a fake "not sustained" item.
+        expect(result.items.some((i) => i.kind === "ACTIVITY_PATTERN")).toBe(true);
+      });
+
+      it("does NOT include a SUSTAINED_ACTIVITY_TREND item when there is insufficient tracked history to evaluate a prior offset (never fabricated merely because ActivityPattern qualifies)", async () => {
+        const org = await makeOrg("DigestSustainedInsufficient");
+        await seedInsufficientSustainedHistory(org, "Sustained Insufficient Co", "digest-sustained-insufficient");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        expect(result.items.some((i) => i.kind === "SUSTAINED_ACTIVITY_TREND")).toBe(false);
+        expect(result.items.some((i) => i.kind === "ACTIVITY_PATTERN")).toBe(true);
+      });
+
+      it("never returns a SUSTAINED_ACTIVITY_TREND item with an empty changeEventIds evidence list", async () => {
+        const org = await makeOrg("DigestSustainedEvidence");
+        await seedSustainedTrue(org, "Sustained Evidence Co", "digest-sustained-evidence");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        const sustainedItems = result.items.filter((i) => i.kind === "SUSTAINED_ACTIVITY_TREND");
+        expect(sustainedItems).toHaveLength(1);
+        expect(sustainedItems[0]!.changeEventIds.length).toBeGreaterThan(0);
+      });
+
+      it("orders SUSTAINED_ACTIVITY_TREND immediately after ACTIVITY_PATTERN in the documented tie-break order", async () => {
+        const org = await makeOrg("DigestSustainedOrdering");
+        await seedSustainedTrue(org, "Sustained Ordering Co", "digest-sustained-ordering");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        const activityIndex = result.items.findIndex((i) => i.kind === "ACTIVITY_PATTERN");
+        const sustainedIndex = result.items.findIndex((i) => i.kind === "SUSTAINED_ACTIVITY_TREND");
+        expect(activityIndex).toBeGreaterThanOrEqual(0);
+        expect(sustainedIndex).toBeGreaterThanOrEqual(0);
+        // Both items share the same competitor and the same detectedAt (the most recent
+        // current-window ChangeEvent), so ordering falls through to the documented kind tie-break -
+        // ACTIVITY_PATTERN before SUSTAINED_ACTIVITY_TREND, never the reverse.
+        expect(activityIndex).toBeLessThan(sustainedIndex);
+      });
+
+      it("computes the cross-competitor 'N of M sustained' count as a plain, purely descriptive tally - same shape as aboveBaselineCount", async () => {
+        const org = await makeOrg("DigestSustainedCrossCompetitor");
+        await seedSustainedTrue(org, "Sustained CC True Co", "digest-sustained-cc-true");
+        await seedReversal(org, "Sustained CC False Co", "digest-sustained-cc-false");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        expect(result.crossCompetitorContext.sustainedCount).toBe(1);
+        expect(result.crossCompetitorContext.totalTrackedCompetitors).toBe(2);
+      });
+
+      it("enforces organization isolation: another organization's digest never surfaces this organization's SUSTAINED_ACTIVITY_TREND item", async () => {
+        const orgA = await makeOrg("DigestSustainedIsoA");
+        const orgB = await makeOrg("DigestSustainedIsoB");
+        const compA = await seedSustainedTrue(orgA, "Sustained Iso A Co", "digest-sustained-iso-a");
+        await makeCompetitor(orgB.id, "Sustained Iso B Co");
+
+        const resultB = await getDigestForOrganization(orgB.id, 30);
+        expect(resultB.items.some((i) => i.kind === "SUSTAINED_ACTIVITY_TREND")).toBe(false);
+        expect(resultB.crossCompetitorContext.sustainedCount).toBe(0);
+        expect(resultB.items.every((i) => i.competitorId !== compA.id)).toBe(true);
+
+        const resultA = await getDigestForOrganization(orgA.id, 30);
+        expect(resultA.crossCompetitorContext.sustainedCount).toBe(1);
+      });
     });
   });
 });

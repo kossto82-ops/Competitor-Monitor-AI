@@ -48,6 +48,14 @@ function DigestItemRow({ item }: { item: DigestItem }) {
               {activityDirectionLabel(item.pattern).label}
             </Badge>
           ) : null}
+          {item.kind === "SUSTAINED_ACTIVITY_TREND" ? (
+            <>
+              <Badge tone="amber">Sustained trend</Badge>
+              <Badge tone={item.direction === "ABOVE_BASELINE" ? "blue" : "gray"} data-testid="digest-sustained-direction-badge">
+                {item.direction === "ABOVE_BASELINE" ? "Above baseline" : "Below baseline"}
+              </Badge>
+            </>
+          ) : null}
           {item.kind === "LIFECYCLE" ? <Badge tone="green">Product lifecycle</Badge> : null}
         </div>
 
@@ -57,6 +65,9 @@ function DigestItemRow({ item }: { item: DigestItem }) {
             ? `${item.pattern.label ?? item.pattern.entityKey} changed price ${item.pattern.changeCount} times in the last ${item.pattern.days} days`
             : null}
           {item.kind === "ACTIVITY_PATTERN" ? activityDetailText(item.pattern) : null}
+          {item.kind === "SUSTAINED_ACTIVITY_TREND"
+            ? `Sustained for ${item.consecutiveQualifyingWindows} consecutive tracked period${item.consecutiveQualifyingWindows === 1 ? "" : "s"}`
+            : null}
           {item.kind === "LIFECYCLE"
             ? [
                 item.added > 0 ? `Added ${item.added} product${item.added === 1 ? "" : "s"}` : null,

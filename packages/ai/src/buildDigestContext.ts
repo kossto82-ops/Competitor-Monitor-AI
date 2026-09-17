@@ -40,6 +40,12 @@ function factsForItem(item: DigestItemForInterpretation): Record<string, string 
         ratio: item.pattern?.ratio ?? null,
         strongEvidence: item.pattern?.strongEvidence ?? null,
       };
+    case "SUSTAINED_ACTIVITY_TREND":
+      return {
+        kind: item.kind,
+        consecutiveQualifyingWindows: item.consecutiveQualifyingWindows ?? null,
+        direction: item.direction ?? null,
+      };
     case "LIFECYCLE":
       return { kind: item.kind, added: item.added ?? 0, removed: item.removed ?? 0 };
   }
@@ -108,9 +114,10 @@ function groupByCompetitor(items: DigestItemForInterpretation[]): CompetitorGrou
  *    philosophy Phase 10's compareDigestItems already uses, never a new
  *    scoring concept.
  * 2. Per-competitor ITEM selection: every already-qualification-gated
- *    pattern item (REPEATED_PRICE_CHANGE / ACTIVITY_PATTERN / LIFECYCLE -
- *    getDigestForOrganization only ever includes these when they qualify)
- *    is unconditionally kept; raw CHANGE_EVENT items are capped to the
+ *    pattern item (REPEATED_PRICE_CHANGE / ACTIVITY_PATTERN /
+ *    SUSTAINED_ACTIVITY_TREND / LIFECYCLE - getDigestForOrganization only
+ *    ever includes these when they qualify) is unconditionally kept; raw
+ *    CHANGE_EVENT items are capped to the
  *    MAX_RAW_CHANGE_EVENTS_PER_COMPETITOR most recent for that
  *    competitor. A final MAX_BUNDLE_ITEMS_TOTAL hard cap is applied across
  *    the whole bundle (competitor order, then item order) purely as
