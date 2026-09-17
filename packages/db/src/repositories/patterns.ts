@@ -310,6 +310,140 @@ export async function getActivityPattern(
 }
 
 // ---------------------------------------------------------------------------
+// Pattern: sustained activity-vs-baseline trend (Phase 14A/14B)
+// ---------------------------------------------------------------------------
+
+/** Number of PRIOR offsets checked, in addition to offset 0 (the current window itself). */
+const MAX_SUSTAINED_LOOKBACK = 2;
+/** consecutiveQualifyingWindows threshold for `sustained: true`. */
+const MIN_SUSTAINED_WINDOWS = 2;
+
+export interface SustainedActivityTrend {
+  competitorId: string;
+  days: number;
+  /** Offset-0 result (the same window `getActivityPattern` alone would return), unchanged shape. */
+  current: ActivityPattern;
+  /** Offset-0 first, then -D, then -2D, ... - only the offsets actually evaluated (bounded by MAX_SUSTAINED_LOOKBACK). */
+  lookback: ActivityPattern[];
+  /** 0 if offset-0 itself does not qualify. */
+  consecutiveQualifyingWindows: number;
+  /** consecutiveQualifyingWindows >= MIN_SUSTAINED_WINDOWS. */
+  sustained: boolean;
+  /** False if tracked history is too short to evaluate the next offset (distinct from "the trend broke"). */
+  sustainedDataAvailable: boolean;
+}
+
+/**
+ * Composes the existing, unmodified `getActivityPattern` at the current
+ * window (offset 0) and up to MAX_SUSTAINED_LOOKBACK immediately-preceding
+ * "current windows" (offset -D, -2D, ...), each with its OWN independent
+ * baseline computed relative to that offset's own `now` - see
+ * PHASE14A-HISTORICAL-INTELLIGENCE-DESIGN-AUDIT.md Section 6.1 for the full
+ * qualification model this function implements verbatim.
+ *
+ * This function issues NO direct ChangeEvent queries of its own - it is a
+ * pure composition over `getActivityPattern`, inheriting that function's
+ * tenant isolation, window semantics, and INSUFFICIENT_HISTORY handling for
+ * free, with zero risk of subtly diverging from its already-hardened
+ * behavior (Phase 14A Section 17/18: `getActivityPattern` must never be
+ * modified for this feature).
+ *
+ * Qualification rule (verbatim from the design audit):
+ * - If offset-0 (`current`) does not qualify, no sustained claim can start
+ *   from an unqualified base: `consecutiveQualifyingWindows: 0`,
+ *   `sustained: false`, `sustainedDataAvailable: false`.
+ * - Otherwise offset-0 counts as the first window in the streak
+ *   (`streak = 1`), and each subsequent offset i (1..MAX_SUSTAINED_LOOKBACK)
+ *   is evaluated in order:
+ *     - if that offset's pattern does NOT qualify, tracked history is not
+ *       yet long enough to look this far back - stop, `sustainedDataAvailable:
+ *       false` (distinct from a reversal).
+ *     - if that offset's direction differs from offset-0's direction (a
+ *       reversal - no averaging, no smoothing), OR offset-0's own direction
+ *       was `AT_BASELINE` (neutral - never a sustained direction), stop,
+ *       `sustainedDataAvailable: true`.
+ *     - otherwise the streak continues (`streak += 1`).
+ * - `sustained: true` iff the final streak >= MIN_SUSTAINED_WINDOWS.
+ *
+ * `now` is an injectable parameter (default `new Date()`) for deterministic
+ * boundary testing, same convention as `getActivityPattern`.
+ */
+export async function getSustainedActivityTrend(
+  organizationId: string,
+  competitorId: string,
+  days: number,
+  now: Date = new Date(),
+): Promise<SustainedActivityTrend> {
+  if (!Number.isInteger(days) || days <= 0) {
+    throw new Error(`days must be a positive integer, got ${days}`);
+  }
+
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const current = await getActivityPattern(organizationId, competitorId, days, now);
+
+  if (!current.qualifies) {
+    return {
+      competitorId,
+      days,
+      current,
+      lookback: [current],
+      consecutiveQualifyingWindows: 0,
+      sustained: false,
+      sustainedDataAvailable: false,
+    };
+  }
+
+  const lookback: ActivityPattern[] = [current];
+  let streak = 1; // offset 0 itself counts as the first window in the streak
+
+  for (let i = 1; i <= MAX_SUSTAINED_LOOKBACK; i += 1) {
+    const offsetNow = new Date(now.getTime() - i * days * msPerDay);
+    // eslint-disable-next-line no-await-in-loop -- must short-circuit at the first break; each offset depends on the prior offset's qualification.
+    const prior = await getActivityPattern(organizationId, competitorId, days, offsetNow);
+    lookback.push(prior);
+
+    if (!prior.qualifies) {
+      // Not enough tracked history yet to look this far back.
+      return {
+        competitorId,
+        days,
+        current,
+        lookback,
+        consecutiveQualifyingWindows: streak,
+        sustained: streak >= MIN_SUSTAINED_WINDOWS,
+        sustainedDataAvailable: false,
+      };
+    }
+
+    if (prior.direction !== current.direction || current.direction === "AT_BASELINE") {
+      // Streak broken by a reversal, or offset-0 itself was only AT_BASELINE
+      // (neutral - never a sustained direction) - no averaging, no smoothing.
+      return {
+        competitorId,
+        days,
+        current,
+        lookback,
+        consecutiveQualifyingWindows: streak,
+        sustained: streak >= MIN_SUSTAINED_WINDOWS,
+        sustainedDataAvailable: true,
+      };
+    }
+
+    streak += 1;
+  }
+
+  return {
+    competitorId,
+    days,
+    current,
+    lookback,
+    consecutiveQualifyingWindows: streak,
+    sustained: streak >= MIN_SUSTAINED_WINDOWS,
+    sustainedDataAvailable: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Pattern: repeated price-change activity per entity (Data Audit Section 4.2)
 // ---------------------------------------------------------------------------
 

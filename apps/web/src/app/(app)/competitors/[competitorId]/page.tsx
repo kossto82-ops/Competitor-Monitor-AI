@@ -8,6 +8,7 @@ import {
   getPriceHistoryForCompetitor,
   getProductLifecycleSummary,
   getRepeatedPriceChangePatterns,
+  getSustainedActivityTrend,
   listChangeEventsForCompetitor,
   listMonitoredUrlsWithStatusForOrg,
 } from "@cma/db";
@@ -22,6 +23,7 @@ import { MonitoredUrlActions } from "@/components/app/MonitoredUrlActions";
 import { ActivityMetricsCard } from "@/components/app/ActivityMetricsCard";
 import { PriceHistoryCard } from "@/components/app/PriceHistoryCard";
 import { PatternsCard } from "@/components/app/PatternsCard";
+import { SustainedTrendCard } from "@/components/app/SustainedTrendCard";
 import { changeTypeDisplay, jobStatusDisplay, summarizeChangeEvent, verificationStateDisplay } from "@/lib/statusDisplay";
 import { formatPeriodDeltaLabel } from "@/lib/periodDisplay";
 import { formatRelativeTime } from "@/lib/formatTime";
@@ -177,16 +179,25 @@ export default async function CompetitorDetailPage({ params, searchParams }: Pag
     getOrganizationById(session.organizationId),
   ]);
   const timezone = organization?.timezone;
-  const [monitoredUrls, changeEvents, activityMetrics, lifecycleSummary, priceHistory, activityPattern, repeatedPriceChangePatterns] =
-    await Promise.all([
-      listMonitoredUrlsWithStatusForOrg(session.organizationId, competitorId),
-      listChangeEventsForCompetitor(session.organizationId, competitorId),
-      getCompetitorActivityMetrics(session.organizationId, competitorId, days, timezone),
-      getProductLifecycleSummary(session.organizationId, competitorId, days, timezone),
-      getPriceHistoryForCompetitor(session.organizationId, competitorId),
-      getActivityPattern(session.organizationId, competitorId, days),
-      getRepeatedPriceChangePatterns(session.organizationId, competitorId, days),
-    ]);
+  const [
+    monitoredUrls,
+    changeEvents,
+    activityMetrics,
+    lifecycleSummary,
+    priceHistory,
+    activityPattern,
+    repeatedPriceChangePatterns,
+    sustainedActivityTrend,
+  ] = await Promise.all([
+    listMonitoredUrlsWithStatusForOrg(session.organizationId, competitorId),
+    listChangeEventsForCompetitor(session.organizationId, competitorId),
+    getCompetitorActivityMetrics(session.organizationId, competitorId, days, timezone),
+    getProductLifecycleSummary(session.organizationId, competitorId, days, timezone),
+    getPriceHistoryForCompetitor(session.organizationId, competitorId),
+    getActivityPattern(session.organizationId, competitorId, days),
+    getRepeatedPriceChangePatterns(session.organizationId, competitorId, days),
+    getSustainedActivityTrend(session.organizationId, competitorId, days),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -222,6 +233,7 @@ export default async function CompetitorDetailPage({ params, searchParams }: Pag
       </div>
 
       <PatternsCard activityPattern={activityPattern} repeatedPriceChangePatterns={repeatedPriceChangePatterns} />
+      <SustainedTrendCard trend={sustainedActivityTrend} />
 
       {monitoredUrls.length === 0 ? (
         <Card>

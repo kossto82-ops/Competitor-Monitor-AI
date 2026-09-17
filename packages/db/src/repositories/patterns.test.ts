@@ -3,7 +3,7 @@ import { prisma, countPrismaQueries } from "../client.js";
 import { createOrganizationWithOwner } from "./organizations.js";
 import { createCompetitor } from "./competitors.js";
 import { createMonitoredUrl } from "./monitoredUrls.js";
-import { getActivityPattern, getEntityHistoryForCompetitor, getRepeatedPriceChangePatterns } from "./patterns.js";
+import { getActivityPattern, getEntityHistoryForCompetitor, getRepeatedPriceChangePatterns, getSustainedActivityTrend } from "./patterns.js";
 import type { ChangeType } from "../../generated/client/index.js";
 
 /** Same real-Postgres, skip-if-unreachable convention as intelligence.test.ts. */
@@ -603,6 +603,251 @@ describe.skipIf(!reachable)("patterns repository (Phase 7)", () => {
 
       const patternsB = await getRepeatedPriceChangePatterns(orgB.id, compB.id, 30);
       expect(patternsB).toEqual([]);
+    });
+  });
+
+  /**
+   * Phase 14B: getSustainedActivityTrend composes the existing, unmodified
+   * getActivityPattern at the current window (offset 0) and up to
+   * MAX_SUSTAINED_LOOKBACK=2 immediately-preceding "current windows"
+   * (offset -D, -2D) - see PHASE14A-HISTORICAL-INTELLIGENCE-DESIGN-AUDIT.md
+   * Section 6.1/Phase 14B spec for the exact qualification model these
+   * tests verify.
+   *
+   * `seedSustainedAboveBaseline` places exactly one event in each of the
+   * current window and the two windows immediately preceding it (offset0's
+   * current, offset0's HW1 = offsetD's current, offset0's HW2 = offsetD's
+   * HW1 = offset2D's current), leaving everything further back at zero.
+   * Because getActivityPattern's zero-baseline special case treats any
+   * non-zero current against a zero baseline as ABOVE_BASELINE, this single
+   * seeding produces a consistent ABOVE_BASELINE direction at every offset
+   * that gets evaluated, regardless of how much tracked history the
+   * competitor has - only `qualifies` (gated purely by Competitor.createdAt,
+   * never by event counts) varies across the boundary matrix below.
+   */
+  async function seedSustainedAboveBaseline(orgId: string, urlId: string, referenceNow: Date, days: number) {
+    // x0: offset0's current window [now-D, now).
+    await createChangeEvent(orgId, urlId, { detectedAt: new Date(referenceNow.getTime() - 5 * DAY) });
+    await createChangeEvent(orgId, urlId, { detectedAt: new Date(referenceNow.getTime() - 10 * DAY) });
+    // x1: offset0's HW1 = offsetD's current, window [now-2D, now-D).
+    await createChangeEvent(orgId, urlId, { detectedAt: new Date(referenceNow.getTime() - (days + 5) * DAY) });
+    // x2: offset0's HW2 = offsetD's HW1 = offset2D's current, window [now-3D, now-2D).
+    await createChangeEvent(orgId, urlId, { detectedAt: new Date(referenceNow.getTime() - (2 * days + 5) * DAY) });
+  }
+
+  describe("getSustainedActivityTrend (Phase 14B)", () => {
+    it("Case 1: returns consecutiveQualifyingWindows=0, sustained=false, sustainedDataAvailable=false when offset-0 itself does not qualify", async () => {
+      const org = await makeOrg("SustainedTooNew");
+      const comp = await makeCompetitor(org.id, "Comp", new Date()); // created just now - no baseline possible
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://sustained-too-new.example.test", category: "GENERAL" });
+      await createChangeEvent(org.id, url.id);
+
+      const trend = await getSustainedActivityTrend(org.id, comp.id, 30);
+      expect(trend.current.qualifies).toBe(false);
+      expect(trend.lookback).toEqual([trend.current]);
+      expect(trend.consecutiveQualifyingWindows).toBe(0);
+      expect(trend.sustained).toBe(false);
+      expect(trend.sustainedDataAvailable).toBe(false);
+    });
+
+    it("Case 7: an offset-0 direction of AT_BASELINE never counts as sustained, even when the next offset has enough tracked history", async () => {
+      const org = await makeOrg("SustainedAtBaseline");
+      const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 200 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://sustained-at-baseline.example.test", category: "GENERAL" });
+      const days = 30;
+
+      // Equal counts in the current window and all 3 historical windows -> ratio exactly 1.0 -> AT_BASELINE.
+      for (const offsetDays of [5, days + 5, 2 * days + 5, 3 * days + 5]) {
+        for (let n = 0; n < 5; n += 1) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - offsetDays * DAY) });
+        }
+      }
+
+      const trend = await getSustainedActivityTrend(org.id, comp.id, days, referenceNow);
+      expect(trend.current.qualifies).toBe(true);
+      expect(trend.current.direction).toBe("AT_BASELINE");
+      expect(trend.consecutiveQualifyingWindows).toBe(1);
+      expect(trend.sustained).toBe(false);
+      expect(trend.sustainedDataAvailable).toBe(true); // the next offset DID have enough history - the streak broke on direction, not on missing data
+    });
+
+    it("Case 5: a reversal (current ABOVE_BASELINE, previous BELOW_BASELINE) breaks the streak immediately - no averaging", async () => {
+      const org = await makeOrg("SustainedReversalAboveBelow");
+      const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 200 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://sustained-reversal-above-below.example.test", category: "GENERAL" });
+      const days = 30;
+
+      // w0 (current)=15 high; w1 (offsetD current)=1 low; w2=w3=w4=10 high (offsetD's own baseline).
+      const windowCounts: [number, number][] = [
+        [5, 15], // w0: [now-D, now)
+        [days + 5, 1], // w1: [now-2D, now-D)
+        [2 * days + 5, 10], // w2: [now-3D, now-2D)
+        [3 * days + 5, 10], // w3: [now-4D, now-3D)
+        [4 * days + 5, 10], // w4: [now-5D, now-4D)
+      ];
+      for (const [offsetDays, count] of windowCounts) {
+        for (let n = 0; n < count; n += 1) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - offsetDays * DAY) });
+        }
+      }
+
+      const trend = await getSustainedActivityTrend(org.id, comp.id, days, referenceNow);
+      expect(trend.current.direction).toBe("ABOVE_BASELINE");
+      expect(trend.lookback[1]?.direction).toBe("BELOW_BASELINE");
+      expect(trend.consecutiveQualifyingWindows).toBe(1);
+      expect(trend.sustained).toBe(false);
+      expect(trend.sustainedDataAvailable).toBe(true);
+    });
+
+    it("Case 6: a reversal (current BELOW_BASELINE, previous ABOVE_BASELINE) breaks the streak immediately", async () => {
+      const org = await makeOrg("SustainedReversalBelowAbove");
+      const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 200 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://sustained-reversal-below-above.example.test", category: "GENERAL" });
+      const days = 30;
+
+      // w0 (current)=2 low; w1 (offsetD current)=15 high; w2=w3=w4=2 low (offsetD's own baseline).
+      const windowCounts: [number, number][] = [
+        [5, 2],
+        [days + 5, 15],
+        [2 * days + 5, 2],
+        [3 * days + 5, 2],
+        [4 * days + 5, 2],
+      ];
+      for (const [offsetDays, count] of windowCounts) {
+        for (let n = 0; n < count; n += 1) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - offsetDays * DAY) });
+        }
+      }
+
+      const trend = await getSustainedActivityTrend(org.id, comp.id, days, referenceNow);
+      expect(trend.current.direction).toBe("BELOW_BASELINE");
+      expect(trend.lookback[1]?.direction).toBe("ABOVE_BASELINE");
+      expect(trend.consecutiveQualifyingWindows).toBe(1);
+      expect(trend.sustained).toBe(false);
+      expect(trend.sustainedDataAvailable).toBe(true);
+    });
+
+    it("Case 8: a reversal at the third window does not invalidate an already-established two-window streak", async () => {
+      const org = await makeOrg("SustainedThreeWindowReversal");
+      const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 200 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://sustained-three-window-reversal.example.test", category: "GENERAL" });
+      const days = 30;
+
+      // w0=5 (offset0 current, ABOVE vs avg(w1,w2,w3)=2.33), w1=4 (offsetD current, ABOVE vs
+      // avg(w2,w3,w4)=1.67), w2=1 (offset2D current, BELOW vs avg(w3,w4,w5)=2).
+      const windowCounts: [number, number][] = [
+        [5, 5], // w0
+        [days + 5, 4], // w1
+        [2 * days + 5, 1], // w2
+        [3 * days + 5, 2], // w3
+        [4 * days + 5, 2], // w4
+        [5 * days + 5, 2], // w5
+      ];
+      for (const [offsetDays, count] of windowCounts) {
+        for (let n = 0; n < count; n += 1) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - offsetDays * DAY) });
+        }
+      }
+
+      const trend = await getSustainedActivityTrend(org.id, comp.id, days, referenceNow);
+      expect(trend.current.direction).toBe("ABOVE_BASELINE");
+      expect(trend.lookback[1]?.direction).toBe("ABOVE_BASELINE");
+      expect(trend.lookback[2]?.direction).toBe("BELOW_BASELINE");
+      expect(trend.consecutiveQualifyingWindows).toBe(2);
+      expect(trend.sustained).toBe(true);
+      expect(trend.sustainedDataAvailable).toBe(true);
+      expect(trend.lookback).toHaveLength(3);
+    });
+
+    it("never leaks another organization's activity into the sustained trend", async () => {
+      const orgA = await makeOrg("SustainedXTenantA");
+      const orgB = await makeOrg("SustainedXTenantB");
+      const compA = await makeCompetitor(orgA.id, "Secret", new Date(Date.now() - 200 * DAY));
+      const urlA = await createMonitoredUrl(orgA.id, compA.id, { url: "https://sustained-secret.example.test", category: "GENERAL" });
+      for (let i = 0; i < 10; i += 1) {
+        await createChangeEvent(orgA.id, urlA.id, { detectedAt: new Date(Date.now() - i * DAY) });
+      }
+
+      const trend = await getSustainedActivityTrend(orgB.id, compA.id, 30);
+      expect(trend.current.qualifies).toBe(false);
+      expect(trend.current.current).toBe(0);
+      expect(trend.sustained).toBe(false);
+      expect(trend.sustainedDataAvailable).toBe(false);
+    });
+
+    it("issues a bounded number of queries (<=3 getActivityPattern calls x <=6 Prisma calls = <=18)", async () => {
+      const org = await makeOrg("SustainedQueryCount");
+      const comp = await makeCompetitor(org.id, "Comp", new Date(Date.now() - 200 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://sustained-query-count.example.test", category: "GENERAL" });
+      for (let i = 0; i < 40; i += 1) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - i * DAY) });
+      }
+
+      const queryCount = await countPrismaQueries(() => getSustainedActivityTrend(org.id, comp.id, 30));
+      expect(queryCount).toBeLessThanOrEqual(18);
+    });
+
+    it("query count does not grow as ChangeEvent volume grows (bounded independent of event volume)", async () => {
+      const org = await makeOrg("SustainedQueryVolume");
+      const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+      const days = 30;
+      // Full 3-window sustained pattern (streak=3) so every offset is actually evaluated -
+      // the worst case for query count, and a FIXED direction/qualification outcome that
+      // adding more (out-of-horizon) events below must not perturb.
+      const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - 200 * DAY));
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://sustained-query-volume.example.test", category: "GENERAL" });
+      await seedSustainedAboveBaseline(org.id, url.id, referenceNow, days);
+
+      const before = await countPrismaQueries(() => getSustainedActivityTrend(org.id, comp.id, days, referenceNow));
+      // Add a burst of events far outside every window this invocation ever queries (the full
+      // lookback horizon tops out at ~6*days back) - these must never change the query count,
+      // the qualification outcome, or the direction.
+      for (let i = 0; i < 40; i += 1) {
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(referenceNow.getTime() - (500 + i) * DAY) });
+      }
+      const after = await countPrismaQueries(() => getSustainedActivityTrend(org.id, comp.id, days, referenceNow));
+
+      expect(before).toBe(18); // full 3-offset evaluation: 3 getActivityPattern calls x 6 Prisma calls each
+      expect(after).toBe(before);
+    });
+
+    /**
+     * Phase 14B Acceptance Criterion 2 / Section 8 of the design audit: the
+     * exact day-count floor for a 2-consecutive-window sustained claim is
+     * 120 tracked days (D=30) - one tier deeper than getActivityPattern's
+     * own 90-day floor - and 150 days for a 3-consecutive-window claim.
+     */
+    describe("window-boundary matrix (120/150-day cliffs, D=30)", () => {
+      const days = 30;
+      const referenceNow = new Date("2026-06-01T00:00:00.000Z");
+
+      it.each([
+        { trackedDays: 119, expectedStreak: 1, expectedSustained: false, expectedDataAvailable: false, expectedLookbackLength: 2 },
+        { trackedDays: 120, expectedStreak: 2, expectedSustained: true, expectedDataAvailable: false, expectedLookbackLength: 3 },
+        { trackedDays: 121, expectedStreak: 2, expectedSustained: true, expectedDataAvailable: false, expectedLookbackLength: 3 },
+        { trackedDays: 149, expectedStreak: 2, expectedSustained: true, expectedDataAvailable: false, expectedLookbackLength: 3 },
+        { trackedDays: 150, expectedStreak: 3, expectedSustained: true, expectedDataAvailable: true, expectedLookbackLength: 3 },
+        { trackedDays: 151, expectedStreak: 3, expectedSustained: true, expectedDataAvailable: true, expectedLookbackLength: 3 },
+      ])(
+        "competitor tracked for exactly $trackedDays days -> consecutiveQualifyingWindows=$expectedStreak, sustained=$expectedSustained, sustainedDataAvailable=$expectedDataAvailable",
+        async ({ trackedDays, expectedStreak, expectedSustained, expectedDataAvailable, expectedLookbackLength }) => {
+          const org = await makeOrg(`Sustained${trackedDays}`);
+          const comp = await makeCompetitor(org.id, "Comp", new Date(referenceNow.getTime() - trackedDays * DAY));
+          const url = await createMonitoredUrl(org.id, comp.id, { url: `https://sustained-${trackedDays}.example.test`, category: "GENERAL" });
+          await seedSustainedAboveBaseline(org.id, url.id, referenceNow, days);
+
+          const trend = await getSustainedActivityTrend(org.id, comp.id, days, referenceNow);
+          expect(trend.current.direction).toBe("ABOVE_BASELINE");
+          expect(trend.consecutiveQualifyingWindows).toBe(expectedStreak);
+          expect(trend.sustained).toBe(expectedSustained);
+          expect(trend.sustainedDataAvailable).toBe(expectedDataAvailable);
+          expect(trend.lookback).toHaveLength(expectedLookbackLength);
+        },
+      );
     });
   });
 });
