@@ -645,6 +645,26 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
       expect(result.items.some((i) => i.kind === "LIFECYCLE")).toBe(false);
     });
 
+    // Phase 22 dogfooding finding: a real scan of a live competitor page (Dropbox's
+    // pricing page) produced exactly one PRODUCT_REMOVED ChangeEvent in the window, and
+    // the Digest rendered it TWICE - once as the raw CHANGE_EVENT item, once again as a
+    // LIFECYCLE roll-up ("Removed 1 product") - both linking to the identical ChangeEvent,
+    // with no new information in the second line. The roll-up should only appear when it
+    // is actually aggregating more than one underlying add/remove event; a single event is
+    // already fully covered by its own CHANGE_EVENT item.
+    it("does NOT include a LIFECYCLE item when only a single product was added or removed (fully covered by its own CHANGE_EVENT item)", async () => {
+      const org = await makeOrg("DigestSingleLifecycle");
+      const comp = await makeCompetitor(org.id, "Single Lifecycle Co");
+      const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-single-lifecycle.example.test", category: "GENERAL" });
+      await createChangeEvent(org.id, url.id, { changeType: "PRODUCT_REMOVED", entityKey: "only-plan", detectedAt: new Date(Date.now() - 1 * DAY) });
+
+      const result = await getDigestForOrganization(org.id, 30);
+      expect(result.items.some((i) => i.kind === "LIFECYCLE")).toBe(false);
+      // The single event is still fully represented - just once, not twice.
+      const changeEventItems = result.items.filter((i) => i.kind === "CHANGE_EVENT");
+      expect(changeEventItems).toHaveLength(1);
+    });
+
     it("computes the cross-competitor 'N of M above baseline' count as a plain, purely descriptive tally", async () => {
       const org = await makeOrg("DigestCrossCompetitor");
       const above = await makeCompetitor(org.id, "Above Co", new Date(Date.now() - 150 * DAY));

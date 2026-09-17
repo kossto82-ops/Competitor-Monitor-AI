@@ -778,9 +778,20 @@ export async function getDigestForOrganization(
       // 4. Lifecycle roll-up - only when something was actually added/removed
       // in this window (derived from the same `events`, see the function
       // doc comment above for why this is not a second getProductLifecycleSummary call).
+      //
+      // Gated on more than one underlying event (Phase 22 dogfooding finding): with
+      // exactly one PRODUCT_ADDED/PRODUCT_REMOVED event in the window, the roll-up
+      // ("Removed 1 product") restates the single raw CHANGE_EVENT item above verbatim -
+      // same competitor, same detectedAt, same evidence link - with zero new information,
+      // just different wording. That was observed live in dogfooding: a single
+      // PRODUCT_REMOVED event rendered as two back-to-back Digest cards ("Product removed"
+      // and "Product lifecycle: Removed 1 product") both linking to the identical
+      // ChangeEvent. The roll-up earns its place only when it is actually summarizing
+      // multiple raw facts into one line (e.g. "Added 2 products · Removed 1 product"),
+      // which is the case the existing tests below already cover.
       const addedEvents = events.filter((e) => e.changeType === "PRODUCT_ADDED");
       const removedEvents = events.filter((e) => e.changeType === "PRODUCT_REMOVED");
-      if (addedEvents.length > 0 || removedEvents.length > 0) {
+      if (addedEvents.length + removedEvents.length > 1) {
         const lifecycleEvents = [...addedEvents, ...removedEvents];
         items.push({
           kind: "LIFECYCLE",

@@ -52,6 +52,20 @@ export function extractJsonLdEntities($: cheerio.CheerioAPI): ExtractedEntity[] 
   return entities;
 }
 
+/**
+ * Schema.org types whose `offers.price` genuinely describes something a
+ * customer pays for. Deliberately excludes generic types like
+ * `SoftwareApplication` or `Organization`: sites commonly attach an
+ * `offers: { category: "free", price: 0 }` block to a SoftwareApplication
+ * node purely for app-store/rich-snippet SEO (the "this app is free to
+ * download" signal), which has nothing to do with the paid plans shown
+ * on the page. Capturing that as a PRICE entity produced a real false
+ * signal in dogfooding: Dropbox's own /plans page was extracted as a
+ * single "$0 Dropbox" price alongside (and indistinguishable from) its
+ * actual $9.99+/mo plans (Phase 22 dogfooding finding).
+ */
+const COMMERCIAL_OFFER_TYPES = new Set(["Product", "Offer", "Service"]);
+
 function collectProductLikeEntities(node: unknown, out: ExtractedEntity[], raw: string): void {
   if (!node || typeof node !== "object") return;
   const obj = node as Record<string, unknown>;
@@ -60,7 +74,7 @@ function collectProductLikeEntities(node: unknown, out: ExtractedEntity[], raw: 
   const name = typeof obj["name"] === "string" ? (obj["name"] as string) : undefined;
 
   const offer = extractOffer(obj["offers"]);
-  if (offer && (type === "Product" || type === "Offer" || name)) {
+  if (offer && type !== undefined && COMMERCIAL_OFFER_TYPES.has(type)) {
     out.push({
       type: "PRICE",
       key: `jsonld:${name ?? "unknown"}`.toLowerCase(),
