@@ -158,6 +158,7 @@ export function buildDigestInterpretationInput(digest: DigestForInterpretation):
     period: { days: digest.days, windowStart: toIso(digest.windowStart), windowEnd: toIso(digest.windowEnd) },
     crossCompetitorContext: {
       aboveBaselineCount: digest.crossCompetitorContext.aboveBaselineCount,
+      sustainedCount: digest.crossCompetitorContext.sustainedCount,
       totalTrackedCompetitors: digest.crossCompetitorContext.totalTrackedCompetitors,
     },
     competitors,

@@ -69,6 +69,7 @@ export interface DigestForInterpretation {
   items: DigestItemForInterpretation[];
   crossCompetitorContext: {
     aboveBaselineCount: number;
+    sustainedCount: number;
     totalTrackedCompetitors: number;
   };
 }
@@ -110,6 +111,7 @@ export interface EvidenceBundle {
   };
   crossCompetitorContext: {
     aboveBaselineCount: number;
+    sustainedCount: number;
     totalTrackedCompetitors: number;
   };
   competitors: EvidenceBundleCompetitor[];

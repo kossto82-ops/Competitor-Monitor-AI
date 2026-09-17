@@ -30,7 +30,7 @@ function digestWithOneCompetitor(): DigestForInterpretation {
         pattern: { current: 4, baselineAverage: 1, qualifyingWindows: 3, days: 30, direction: "ABOVE_BASELINE", ratio: 4, strongEvidence: true },
       },
     ],
-    crossCompetitorContext: { aboveBaselineCount: 1, totalTrackedCompetitors: 2 },
+    crossCompetitorContext: { aboveBaselineCount: 1, sustainedCount: 0, totalTrackedCompetitors: 2 },
   };
 }
 
@@ -41,7 +41,7 @@ function emptyDigest(): DigestForInterpretation {
     windowEnd: WINDOW_END,
     totalTrackedCompetitors: 0,
     items: [],
-    crossCompetitorContext: { aboveBaselineCount: 0, totalTrackedCompetitors: 0 },
+    crossCompetitorContext: { aboveBaselineCount: 0, sustainedCount: 0, totalTrackedCompetitors: 0 },
   };
 }
 

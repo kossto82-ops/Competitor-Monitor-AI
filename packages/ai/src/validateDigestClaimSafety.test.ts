@@ -32,7 +32,7 @@ function makeDigest(items: DigestItemForInterpretation[]): DigestForInterpretati
     windowEnd: WINDOW_END,
     totalTrackedCompetitors: 1,
     items,
-    crossCompetitorContext: { aboveBaselineCount: 1, totalTrackedCompetitors: 1 },
+    crossCompetitorContext: { aboveBaselineCount: 1, sustainedCount: 0, totalTrackedCompetitors: 1 },
   };
 }
 

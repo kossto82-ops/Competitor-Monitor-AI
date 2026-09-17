@@ -158,6 +158,24 @@ test.describe("Deterministic Digest (Phase 10)", () => {
 
     await page.goto("/digest?days=30");
     await expect(page.getByTestId("digest-cross-competitor-context")).toContainText("1 of 2");
+    // Phase 18: neither competitor has a 120+ day tracked history here, so sustainedCount is
+    // deterministically 0 - the aggregate line must still render (never hidden), not omitted.
+    await expect(page.getByTestId("digest-sustained-cross-competitor-context")).toContainText("0 of 2");
+  });
+
+  test("12 - Phase 18: sustained cross-competitor context - '{sustainedCount} of {totalTrackedCompetitors}' reflects only competitors with a genuine sustained streak", async ({ page }) => {
+    const suffix = Date.now();
+    const org = makeTestOrg("DigestSustainedCrossCompetitor");
+    await signup(page, org);
+
+    const sustainedId = await setUpCompetitorInOrg(page, `Digest Sustained CC Co ${suffix}`, `digest-sustained-cc-${suffix}`);
+    await setUpCompetitorInOrg(page, `Digest Fresh CC Co ${suffix}`, `digest-fresh-cc-${suffix}`);
+
+    // Same empirically-verified fixture as test 8 above: sustained: true, direction: ABOVE_BASELINE.
+    seedPatternEvents(sustainedId, [{ detectedAtDaysAgo: 5 }, { detectedAtDaysAgo: 5 }, { detectedAtDaysAgo: 35 }, { detectedAtDaysAgo: 65 }], 160);
+
+    await page.goto("/digest?days=30");
+    await expect(page.getByTestId("digest-sustained-cross-competitor-context")).toContainText("1 of 2");
   });
 
   test("8 - sustained activity trend: a competitor with a genuine 3-consecutive-window streak renders the SUSTAINED_ACTIVITY_TREND item", async ({ page }) => {

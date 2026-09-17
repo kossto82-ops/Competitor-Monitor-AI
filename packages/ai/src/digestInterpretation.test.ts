@@ -58,7 +58,7 @@ function makeDigest(items: DigestItemForInterpretation[], overrides: Partial<Dig
     windowEnd: WINDOW_END,
     totalTrackedCompetitors: 1,
     items,
-    crossCompetitorContext: { aboveBaselineCount: 1, totalTrackedCompetitors: 1 },
+    crossCompetitorContext: { aboveBaselineCount: 1, sustainedCount: 0, totalTrackedCompetitors: 1 },
     ...overrides,
   };
 }
@@ -126,7 +126,10 @@ describe("buildDigestInterpretationInput", () => {
   });
 
   it("Case 5: an empty digest produces an empty bundle with no evidence ids at all", () => {
-    const digest = makeDigest([], { totalTrackedCompetitors: 0, crossCompetitorContext: { aboveBaselineCount: 0, totalTrackedCompetitors: 0 } });
+    const digest = makeDigest([], {
+      totalTrackedCompetitors: 0,
+      crossCompetitorContext: { aboveBaselineCount: 0, sustainedCount: 0, totalTrackedCompetitors: 0 },
+    });
     const bundle = buildDigestInterpretationInput(digest);
 
     expect(bundle.competitors).toEqual([]);
@@ -159,6 +162,36 @@ describe("buildDigestInterpretationInput", () => {
     const digest = makeDigest([sustainedActivityTrendItem()]);
     const bundle = buildDigestInterpretationInput(digest);
     expect(bundle.competitors[0]!.items[0]!.evidenceChangeEventIds.length).toBeGreaterThan(0);
+  });
+
+  it("Phase 18 Test A: crossCompetitorContext.sustainedCount is propagated verbatim from the digest into the bundle, not recomputed", () => {
+    const digest = makeDigest([], {
+      totalTrackedCompetitors: 3,
+      crossCompetitorContext: { aboveBaselineCount: 1, sustainedCount: 2, totalTrackedCompetitors: 3 },
+    });
+    const bundle = buildDigestInterpretationInput(digest);
+    expect(bundle.crossCompetitorContext.sustainedCount).toBe(2);
+  });
+
+  it("Phase 18 Test B: crossCompetitorContext.sustainedCount === 0 is propagated as 0, never omitted/null/undefined", () => {
+    const digest = makeDigest([], {
+      totalTrackedCompetitors: 2,
+      crossCompetitorContext: { aboveBaselineCount: 0, sustainedCount: 0, totalTrackedCompetitors: 2 },
+    });
+    const bundle = buildDigestInterpretationInput(digest);
+    expect(bundle.crossCompetitorContext.sustainedCount).toBe(0);
+    expect(bundle.crossCompetitorContext).toHaveProperty("sustainedCount");
+  });
+
+  it("Phase 18 Test C: sustainedCount is a straight passthrough - changing it on the digest changes only that field on the bundle, nothing else is derived from it", () => {
+    const digest = makeDigest([activityPatternItem()], {
+      totalTrackedCompetitors: 5,
+      crossCompetitorContext: { aboveBaselineCount: 4, sustainedCount: 5, totalTrackedCompetitors: 5 },
+    });
+    const bundle = buildDigestInterpretationInput(digest);
+    expect(bundle.crossCompetitorContext).toEqual({ aboveBaselineCount: 4, sustainedCount: 5, totalTrackedCompetitors: 5 });
+    // Item-level facts are unaffected by the cross-competitor aggregate.
+    expect(bundle.competitors[0]!.items[0]!.facts["direction"]).toBe("ABOVE_BASELINE");
   });
 
   it("Phase 16: the existing four item kinds' facts/evidence are unaffected by the new SUSTAINED_ACTIVITY_TREND kind", () => {
@@ -294,7 +327,7 @@ describe("analyzeAndValidateDigest (Case 4: cross-competitor context)", () => {
   it("the fake provider's canned response is itself accepted by the real validation path end to end", async () => {
     const digest = makeDigest([activityPatternItem()], {
       totalTrackedCompetitors: 2,
-      crossCompetitorContext: { aboveBaselineCount: 1, totalTrackedCompetitors: 2 },
+      crossCompetitorContext: { aboveBaselineCount: 1, sustainedCount: 2, totalTrackedCompetitors: 2 },
     });
     const bundle = buildDigestInterpretationInput(digest);
     const provider = createFakeAiProvider();
@@ -330,7 +363,10 @@ describe("analyzeAndValidateDigest (Case 4: cross-competitor context)", () => {
   });
 
   it("Case 5: an empty bundle produces an insufficient-evidence style summary with no fabricated claims, without needing a provider call in production code (the fake provider still returns a canned insufficient-evidence response here to prove the schema accepts it)", async () => {
-    const digest = makeDigest([], { totalTrackedCompetitors: 0, crossCompetitorContext: { aboveBaselineCount: 0, totalTrackedCompetitors: 0 } });
+    const digest = makeDigest([], {
+      totalTrackedCompetitors: 0,
+      crossCompetitorContext: { aboveBaselineCount: 0, sustainedCount: 0, totalTrackedCompetitors: 0 },
+    });
     const bundle = buildDigestInterpretationInput(digest);
     const provider = createFakeAiProvider();
 

@@ -130,7 +130,7 @@ export default async function DigestPage({ searchParams }: PageProps) {
     );
   }
 
-  const { aboveBaselineCount, totalTrackedCompetitors } = digest.crossCompetitorContext;
+  const { aboveBaselineCount, sustainedCount, totalTrackedCompetitors } = digest.crossCompetitorContext;
 
   return (
     <div className="space-y-6">
@@ -160,13 +160,22 @@ export default async function DigestPage({ searchParams }: PageProps) {
 
       <Card>
         <CardContent className="flex items-center justify-between gap-3 py-4">
-          <p className="text-sm text-slate-700" data-testid="digest-cross-competitor-context">
-            <span className="font-semibold text-slate-900">
-              {aboveBaselineCount} of {totalTrackedCompetitors}
-            </span>{" "}
-            tracked competitor{totalTrackedCompetitors === 1 ? "" : "s"} {aboveBaselineCount === 1 ? "is" : "are"} currently above{" "}
-            {aboveBaselineCount === 1 ? "its" : "their"} own historical baseline.
-          </p>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="text-sm text-slate-700" data-testid="digest-cross-competitor-context">
+              <span className="font-semibold text-slate-900">
+                {aboveBaselineCount} of {totalTrackedCompetitors}
+              </span>{" "}
+              tracked competitor{totalTrackedCompetitors === 1 ? "" : "s"} {aboveBaselineCount === 1 ? "is" : "are"} currently above{" "}
+              {aboveBaselineCount === 1 ? "its" : "their"} own historical baseline.
+            </p>
+            <p className="text-sm text-slate-700" data-testid="digest-sustained-cross-competitor-context">
+              <span className="font-semibold text-slate-900">
+                {sustainedCount} of {totalTrackedCompetitors}
+              </span>{" "}
+              tracked competitor{totalTrackedCompetitors === 1 ? "" : "s"} currently show{sustainedCount === 1 ? "s" : ""} a sustained
+              activity pattern (2 or more consecutive tracked periods).
+            </p>
+          </div>
           <Link href="/compare" className="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-700">
             View comparison →
           </Link>
