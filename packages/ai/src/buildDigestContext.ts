@@ -45,6 +45,10 @@ function factsForItem(item: DigestItemForInterpretation): Record<string, string 
         kind: item.kind,
         consecutiveQualifyingWindows: item.consecutiveQualifyingWindows ?? null,
         direction: item.direction ?? null,
+        // Phase 20: straight passthrough of @cma/db's deterministic composition - never
+        // recomputed here (packages/ai must stay a pure interpretation layer over facts the
+        // deterministic Tier 2/3 layer already verified).
+        repeatedPriceChangeCoOccurs: item.repeatedPriceChangeCoOccurs ?? null,
       };
     case "LIFECYCLE":
       return { kind: item.kind, added: item.added ?? 0, removed: item.removed ?? 0 };

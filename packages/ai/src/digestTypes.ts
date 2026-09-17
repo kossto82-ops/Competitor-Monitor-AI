@@ -55,6 +55,16 @@ export interface DigestItemForInterpretation {
   // reconstructible from @cma/db's SustainedActivityTrend.lookback.
   consecutiveQualifyingWindows?: number;
   direction?: "ABOVE_BASELINE" | "BELOW_BASELINE";
+  /**
+   * Phase 20 (see PHASE19-INTELLIGENCE-COMPOSITION-ATTENTION-AUDIT.md
+   * Section 15): whether this competitor's qualifying repeated-price-change
+   * pattern(s) co-occur, in the same digest window, with this competitor's
+   * own sustained activity trend - a competitor-level boolean AND of two
+   * already-computed @cma/db facts, never recomputed here. No new
+   * claim-safety category: it is a plain boolean, contains no page-derived
+   * text, and is not an entity-level or cross-competitor claim.
+   */
+  repeatedPriceChangeCoOccurs?: boolean;
 
   // LIFECYCLE
   added?: number;

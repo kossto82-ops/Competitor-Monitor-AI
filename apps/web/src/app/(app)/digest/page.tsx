@@ -68,6 +68,12 @@ function DigestItemRow({ item }: { item: DigestItem }) {
           {item.kind === "SUSTAINED_ACTIVITY_TREND"
             ? `Sustained for ${item.consecutiveQualifyingWindows} consecutive tracked period${item.consecutiveQualifyingWindows === 1 ? "" : "s"}`
             : null}
+          {item.kind === "SUSTAINED_ACTIVITY_TREND" && item.repeatedPriceChangeCoOccurs ? (
+            <span data-testid="digest-sustained-repeated-price-cooccurrence" className="block text-slate-500">
+              {" "}
+              Repeated price changes are also occurring for this competitor in this period.
+            </span>
+          ) : null}
           {item.kind === "LIFECYCLE"
             ? [
                 item.added > 0 ? `Added ${item.added} product${item.added === 1 ? "" : "s"}` : null,

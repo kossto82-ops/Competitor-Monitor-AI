@@ -12,6 +12,7 @@ import {
   getPriceHistoryForCompetitor,
   getProductLifecycleSummary,
   type ChangeEventDigestItem,
+  type DigestItem,
   type LifecycleDigestItem,
   type SustainedActivityTrendDigestItem,
 } from "./intelligence.js";
@@ -933,6 +934,174 @@ describe.skipIf(!reachable)("intelligence repository (Phase 6)", () => {
         const resultA = await getDigestForOrganization(orgA.id, 30);
         expect(resultA.crossCompetitorContext.sustainedCount).toBe(1);
       });
+
+      /**
+       * Phase 20 (see PHASE19-INTELLIGENCE-COMPOSITION-ATTENTION-AUDIT.md
+       * Section 15 / PHASE20-VALIDATION-REPORT.md): the competitor-level
+       * `sustainedActivityTrend.sustained === true AND
+       * repeatedPricePatterns.some(p => p.qualifies)` composition on
+       * SustainedActivityTrendDigestItem.repeatedPriceChangeCoOccurs. Nested
+       * inside this same describe block (not a sibling) so it can reuse
+       * `seedSustainedTrue` unmodified - every fixture below reuses
+       * `getSustainedActivityTrend` and `getRepeatedPriceChangePatterns`
+       * completely unmodified; only the seeded ChangeEvents differ from the
+       * Phase 16 fixtures above.
+       */
+      describe("repeatedPriceChangeCoOccurs composition (Phase 20)", () => {
+      /**
+       * Same empirically-verified base as seedSustainedTrue above
+       * (sustained: true, consecutiveQualifyingWindows: 3, direction:
+       * ABOVE_BASELINE) PLUS a qualifying (>= 2) repeated price-change group
+       * in the current window on its own distinct entityKey. Adding these 2
+       * extra current-window events raises the current-window count from 2
+       * to 4 but does not change the ratio bucket (4 / 0.667 = 6.0, still
+       * >= BASELINE_RATIO_THRESHOLD (1.5)) - direction and the sustained
+       * streak are unaffected; only `repeatedPriceChangeCoOccurs` changes.
+       * An optional non-qualifying third entityKey (1 change only) proves
+       * Test E: "at least one qualifying group is sufficient", not "every
+       * group must qualify".
+       */
+      async function seedSustainedTrueWithRepeatedPrice(
+        org: { id: string },
+        competitorName: string,
+        urlSlug: string,
+        options: { includeNonQualifyingGroup?: boolean } = {},
+      ) {
+        const comp = await makeCompetitor(org.id, competitorName, new Date(Date.now() - 160 * DAY));
+        const url = await createMonitoredUrl(org.id, comp.id, { url: `https://${urlSlug}.example.test`, category: "GENERAL" });
+        for (const daysAgo of [5, 5]) {
+          await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - daysAgo * DAY), entityKey: `sust-cur-${Math.random()}` });
+        }
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - 35 * DAY), entityKey: "sust-mid" });
+        await createChangeEvent(org.id, url.id, { detectedAt: new Date(Date.now() - 65 * DAY), entityKey: "sust-far" });
+        // The qualifying (>= 2) repeated price-change group, entirely within the current [0,30) window.
+        await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "co-price-plan", detectedAt: new Date(Date.now() - 3 * DAY) });
+        await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "co-price-plan", detectedAt: new Date(Date.now() - 8 * DAY) });
+        if (options.includeNonQualifyingGroup) {
+          await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "solo-plan", detectedAt: new Date(Date.now() - 2 * DAY) });
+        }
+        return comp;
+      }
+
+      /** A freshly-tracked (createdAt: today) competitor with a qualifying repeated-price group - getActivityPattern is INSUFFICIENT_HISTORY, so sustained is trivially false. Same fixture shape as the plain REPEATED_PRICE_CHANGE test above. */
+      async function seedRepeatedPriceOnlyNotSustained(org: { id: string }, competitorName: string, urlSlug: string) {
+        const comp = await makeCompetitor(org.id, competitorName);
+        const url = await createMonitoredUrl(org.id, comp.id, { url: `https://${urlSlug}.example.test`, category: "GENERAL" });
+        await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "fresh-plan", detectedAt: new Date(Date.now() - 10 * DAY) });
+        await createChangeEvent(org.id, url.id, { changeType: "PRICE_CHANGE", entityKey: "fresh-plan", detectedAt: new Date(Date.now() - 2 * DAY) });
+        return comp;
+      }
+
+      function findSustainedItem(items: DigestItem[]): SustainedActivityTrendDigestItem | undefined {
+        return items.find((i): i is SustainedActivityTrendDigestItem => i.kind === "SUSTAINED_ACTIVITY_TREND");
+      }
+
+      it("Test A - both true: sustained AND a qualifying repeated-price group in the same window -> repeatedPriceChangeCoOccurs: true", async () => {
+        const org = await makeOrg("CoOccurBothTrue");
+        await seedSustainedTrueWithRepeatedPrice(org, "CoOccur Both True Co", "digest-cooccur-both-true");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        const sustainedItem = findSustainedItem(result.items);
+        expect(sustainedItem).toBeDefined();
+        expect(sustainedItem!.repeatedPriceChangeCoOccurs).toBe(true);
+        // The REPEATED_PRICE_CHANGE item itself is unaffected - still exactly one qualifying group.
+        expect(result.items.filter((i) => i.kind === "REPEATED_PRICE_CHANGE")).toHaveLength(1);
+      });
+
+      it("Test B - sustained only: sustained === true but no repeated-price group qualifies -> repeatedPriceChangeCoOccurs: false", async () => {
+        const org = await makeOrg("CoOccurSustainedOnly");
+        await seedSustainedTrue(org, "CoOccur Sustained Only Co", "digest-cooccur-sustained-only");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        const sustainedItem = findSustainedItem(result.items);
+        expect(sustainedItem).toBeDefined();
+        expect(sustainedItem!.repeatedPriceChangeCoOccurs).toBe(false);
+        expect(result.items.some((i) => i.kind === "REPEATED_PRICE_CHANGE")).toBe(false);
+      });
+
+      it("Test C - repeated price only: a qualifying repeated-price group with sustained === false -> no SUSTAINED_ACTIVITY_TREND item at all (never a false-with-annotation), REPEATED_PRICE_CHANGE remains a normal item", async () => {
+        const org = await makeOrg("CoOccurRepeatedOnly");
+        await seedRepeatedPriceOnlyNotSustained(org, "CoOccur Repeated Only Co", "digest-cooccur-repeated-only");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        expect(findSustainedItem(result.items)).toBeUndefined();
+        const repeatedItems = result.items.filter((i) => i.kind === "REPEATED_PRICE_CHANGE");
+        expect(repeatedItems).toHaveLength(1);
+      });
+
+      it("Test D - neither: no sustained trend and no qualifying repeated-price group -> no SUSTAINED_ACTIVITY_TREND item, no REPEATED_PRICE_CHANGE item", async () => {
+        const org = await makeOrg("CoOccurNeither");
+        const comp = await makeCompetitor(org.id, "CoOccur Neither Co");
+        const url = await createMonitoredUrl(org.id, comp.id, { url: "https://digest-cooccur-neither.example.test", category: "GENERAL" });
+        await createChangeEvent(org.id, url.id, { changeType: "CONTENT_CHANGE", entityKey: null, detectedAt: new Date(Date.now() - 1 * DAY) });
+
+        const result = await getDigestForOrganization(org.id, 30);
+        expect(findSustainedItem(result.items)).toBeUndefined();
+        expect(result.items.some((i) => i.kind === "REPEATED_PRICE_CHANGE")).toBe(false);
+      });
+
+      it("Test E - multiple repeated-price groups: only one needs to qualify for repeatedPriceChangeCoOccurs to be true", async () => {
+        const org = await makeOrg("CoOccurMultipleGroups");
+        await seedSustainedTrueWithRepeatedPrice(org, "CoOccur Multiple Groups Co", "digest-cooccur-multi", { includeNonQualifyingGroup: true });
+
+        const result = await getDigestForOrganization(org.id, 30);
+        const sustainedItem = findSustainedItem(result.items);
+        expect(sustainedItem).toBeDefined();
+        expect(sustainedItem!.repeatedPriceChangeCoOccurs).toBe(true);
+        // Exactly one of the two entityKey groups qualifies ("solo-plan" has only 1 change).
+        expect(result.items.filter((i) => i.kind === "REPEATED_PRICE_CHANGE")).toHaveLength(1);
+      });
+
+      it("Test F - evidence: the co-occurrence fact never produces an empty changeEventIds list, and does not disturb the item's existing evidence", async () => {
+        const org = await makeOrg("CoOccurEvidence");
+        await seedSustainedTrueWithRepeatedPrice(org, "CoOccur Evidence Co", "digest-cooccur-evidence");
+
+        const result = await getDigestForOrganization(org.id, 30);
+        const sustainedItem = findSustainedItem(result.items);
+        expect(sustainedItem).toBeDefined();
+        expect(sustainedItem!.repeatedPriceChangeCoOccurs).toBe(true);
+        expect(sustainedItem!.changeEventIds.length).toBeGreaterThan(0);
+      });
+
+      it("Test H - tenant isolation: organization B's own repeated-price/sustained fixtures never influence organization A's repeatedPriceChangeCoOccurs result", async () => {
+        const orgA = await makeOrg("CoOccurIsoA");
+        const orgB = await makeOrg("CoOccurIsoB");
+
+        // Org A: sustained only (co-occurs should be false).
+        await seedSustainedTrue(orgA, "CoOccur Iso A Co", "digest-cooccur-iso-a");
+        // Org B: sustained AND a qualifying repeated-price group (co-occurs should be true) -
+        // if tenant isolation ever broke, org A's result could pick up org B's `true`.
+        await seedSustainedTrueWithRepeatedPrice(orgB, "CoOccur Iso B Co", "digest-cooccur-iso-b");
+
+        const resultA = await getDigestForOrganization(orgA.id, 30);
+        const resultB = await getDigestForOrganization(orgB.id, 30);
+
+        expect(findSustainedItem(resultA.items)!.repeatedPriceChangeCoOccurs).toBe(false);
+        expect(findSustainedItem(resultB.items)!.repeatedPriceChangeCoOccurs).toBe(true);
+        expect(resultA.items.every((i) => i.competitorId !== findSustainedItem(resultB.items)!.competitorId)).toBe(true);
+      });
+
+      it("Test I - query bound: computing repeatedPriceChangeCoOccurs=true costs the SAME number of Prisma queries as the identical sustained-only fixture (proves zero additional queries, not merely 'under some ceiling')", async () => {
+        // Same tracked-history depth (160 days) and the same 3-offset sustained streak in both
+        // orgs - the ONLY difference is the 2 extra PRICE_CHANGE events on a shared entityKey
+        // that make the current window's repeated-price group qualify. getActivityPattern and
+        // getSustainedActivityTrend issue a FIXED number of queries per offset regardless of how
+        // many ChangeEvents exist in that offset's window (Phase 7/14B's own O(competitors),
+        // never O(events) invariant), and getRepeatedPriceChangePatterns issues exactly 2 queries
+        // (urls + price events) regardless of how many events or groups it finds. If Phase 20's
+        // composition needed even one more query, these two counts would diverge.
+        const orgSustainedOnly = await makeOrg("CoOccurQBoundSustainedOnly");
+        await seedSustainedTrue(orgSustainedOnly, "CoOccur QBound Sustained Only Co", "digest-cooccur-qbound-sustained-only");
+
+        const orgWithRepeatedPrice = await makeOrg("CoOccurQBoundWithRepeatedPrice");
+        await seedSustainedTrueWithRepeatedPrice(orgWithRepeatedPrice, "CoOccur QBound With Repeated Price Co", "digest-cooccur-qbound-with-repeated");
+
+        const sustainedOnlyQueryCount = await countPrismaQueries(() => getDigestForOrganization(orgSustainedOnly.id, 30));
+        const withRepeatedPriceQueryCount = await countPrismaQueries(() => getDigestForOrganization(orgWithRepeatedPrice.id, 30));
+
+        expect(withRepeatedPriceQueryCount).toBe(sustainedOnlyQueryCount);
+      });
     });
+  });
   });
 });

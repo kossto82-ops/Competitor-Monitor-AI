@@ -47,6 +47,9 @@ function sustainedActivityTrendItem(overrides: Partial<DigestItemForInterpretati
     changeEventIds: ["ce-1", "ce-2"],
     consecutiveQualifyingWindows: 3,
     direction: "ABOVE_BASELINE",
+    // Phase 20 default - most existing tests using this factory don't care about the
+    // composition, so it defaults to the "sustained only" case (false).
+    repeatedPriceChangeCoOccurs: false,
     ...overrides,
   };
 }
@@ -142,8 +145,23 @@ describe("buildDigestInterpretationInput", () => {
 
     const item = bundle.competitors[0]!.items[0]!;
     expect(item.kind).toBe("SUSTAINED_ACTIVITY_TREND");
-    expect(item.facts).toEqual({ kind: "SUSTAINED_ACTIVITY_TREND", consecutiveQualifyingWindows: 3, direction: "ABOVE_BASELINE" });
+    expect(item.facts).toEqual({
+      kind: "SUSTAINED_ACTIVITY_TREND",
+      consecutiveQualifyingWindows: 3,
+      direction: "ABOVE_BASELINE",
+      repeatedPriceChangeCoOccurs: false,
+    });
     expect(item.evidenceChangeEventIds).toEqual(["ce-1", "ce-2"]);
+  });
+
+  it("Phase 20 Test G: repeatedPriceChangeCoOccurs reaches DigestForInterpretation/EvidenceBundle exactly as the DB computed it, with no recomputation in packages/ai", () => {
+    const digestTrue = makeDigest([sustainedActivityTrendItem({ repeatedPriceChangeCoOccurs: true })]);
+    const bundleTrue = buildDigestInterpretationInput(digestTrue);
+    expect(bundleTrue.competitors[0]!.items[0]!.facts["repeatedPriceChangeCoOccurs"]).toBe(true);
+
+    const digestFalse = makeDigest([sustainedActivityTrendItem({ repeatedPriceChangeCoOccurs: false })]);
+    const bundleFalse = buildDigestInterpretationInput(digestFalse);
+    expect(bundleFalse.competitors[0]!.items[0]!.facts["repeatedPriceChangeCoOccurs"]).toBe(false);
   });
 
   it("Phase 16: a SUSTAINED_ACTIVITY_TREND item is never dropped by the per-competitor CHANGE_EVENT cap - it is a qualified pattern item, same as ACTIVITY_PATTERN/REPEATED_PRICE_CHANGE", () => {

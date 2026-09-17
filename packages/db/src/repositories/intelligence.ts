@@ -408,6 +408,14 @@ export async function getCompetitiveContext(
 // direct ChangeEvent column or an already-tested Phase 7/14B pattern object,
 // reused verbatim. There is NO new baseline formula, NO importance/relevance
 // score, and NO AI call anywhere in this function.
+//
+// Phase 20 (see PHASE19-INTELLIGENCE-COMPOSITION-ATTENTION-AUDIT.md Section
+// 15): adds exactly one further composition on top of the above -
+// SustainedActivityTrendDigestItem.repeatedPriceChangeCoOccurs, a deterministic
+// competitor-level boolean AND of `sustainedActivityTrend.sustained` and
+// `repeatedPricePatterns.some(p => p.qualifies)`. Still zero new Prisma
+// queries: both inputs are already computed by the exact same per-competitor
+// Promise.all below.
 // ---------------------------------------------------------------------------
 
 /** Fixed, documented tie-break order for items sharing the same `detectedAt` - never a hidden importance ranking, just a stable sort key. */
@@ -455,11 +463,29 @@ export interface ActivityPatternDigestItem extends DigestItemCommon {
  * or `INSUFFICIENT_HISTORY` here - a sustained streak requires offset-0
  * itself to `qualify` with a non-neutral direction (see
  * getSustainedActivityTrend's own doc comment).
+ *
+ * `repeatedPriceChangeCoOccurs` (Phase 20, see
+ * PHASE19-INTELLIGENCE-COMPOSITION-ATTENTION-AUDIT.md Section 15): a purely
+ * deterministic, competitor-level composition of two already-computed
+ * signals - `sustainedActivityTrend.sustained === true` (guaranteed by this
+ * item's own inclusion gate below) AND at least one of this competitor's
+ * `repeatedPricePatterns` currently `qualifies`. Always a real boolean,
+ * never null/undefined - both underlying computations are deterministic, so
+ * there is no third state. This is NOT an entity-level claim: it does NOT
+ * mean the SAME product's price changes are themselves sustained across
+ * periods (that would require reconciling `entityKey` identity across
+ * historical windows, which remains unsolved - see
+ * PHASE19-...AUDIT.md Section 11). It means only that, in the current
+ * digest window, this competitor's overall activity qualifies as sustained
+ * AND at least one of its products/plans shows a qualifying repeated
+ * price-change pattern - two independently-thresholded facts observed
+ * together, nothing more.
  */
 export interface SustainedActivityTrendDigestItem extends DigestItemCommon {
   kind: "SUSTAINED_ACTIVITY_TREND";
   consecutiveQualifyingWindows: number;
   direction: "ABOVE_BASELINE" | "BELOW_BASELINE";
+  repeatedPriceChangeCoOccurs: boolean;
 }
 
 /** A deterministic added/removed roll-up for this competitor within the digest window, derived from the same raw ChangeEvents already fetched for the CHANGE_EVENT items above (see the function doc comment for why this is NOT a second call to getProductLifecycleSummary). */
@@ -740,6 +766,12 @@ export async function getDigestForOrganization(
           // getSustainedActivityTrend's doc comment: AT_BASELINE always breaks the streak at
           // offset-0) - same narrowing convention as SustainedTrendCard.tsx.
           direction: sustainedActivityTrend.current.direction === "BELOW_BASELINE" ? "BELOW_BASELINE" : "ABOVE_BASELINE",
+          // Phase 20: competitor-level composition, computed in memory from the two results
+          // already fetched by this same Promise.all above - zero additional Prisma queries.
+          // `sustained` is already `true` in this branch, so this reduces to "does at least one
+          // repeated-price-change group qualify in the current window" - see the field's own
+          // doc comment on SustainedActivityTrendDigestItem for the exact semantics.
+          repeatedPriceChangeCoOccurs: repeatedPricePatterns.some((p) => p.qualifies),
         });
       }
 
