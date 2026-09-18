@@ -1,6 +1,27 @@
 import { currentReportDateInTimezone } from "@cma/core";
 import { listOrganizationsForDailyReportScheduling } from "@cma/db";
-import { createDailyReportQueue, dailyReportJobId } from "@cma/queue";
+import { createDailyReportQueue, dailyReportJobId, type DailyReportJobPayload } from "@cma/queue";
+import type { Queue } from "bullmq";
+import { pathToFileURL } from "node:url";
+
+interface DailyReportSchedulingOrgLike {
+  id: string;
+  timezone: string;
+}
+
+export interface EnqueueDailyReportsDeps {
+  listOrganizationsForDailyReportScheduling: () => Promise<DailyReportSchedulingOrgLike[]>;
+  createDailyReportQueue: () => Pick<Queue<DailyReportJobPayload>, "add" | "close">;
+}
+
+export function createDefaultEnqueueDailyReportsDeps(): EnqueueDailyReportsDeps {
+  return { listOrganizationsForDailyReportScheduling, createDailyReportQueue };
+}
+
+export interface EnqueueDailyReportsResult {
+  organizationCount: number;
+  enqueuedCount: number;
+}
 
 /**
  * Phase 4 (Section 11): the minimum scheduling this phase asks for - a
@@ -17,27 +38,47 @@ import { createDailyReportQueue, dailyReportJobId } from "@cma/queue";
  * itself is expected to be invoked once daily (e.g. via a K8s CronJob or
  * a plain OS cron entry, see DevRunbook.md), same "basic/manual
  * scheduling" spirit as enqueueAll.ts's monitoring-job equivalent.
+ *
+ * Phase 26: extracted from `main()` so `scheduler.ts` can call it
+ * on a recurring, in-process daily tick. `dailyReportJobId` is
+ * per-organization-per-calendar-day, so calling this function more than
+ * once on the same day is a safe no-op re-add (BullMQ dedupes on job id)
+ * rather than a duplicate report. This function never touches AI queues.
  */
-async function main() {
-  const organizations = await listOrganizationsForDailyReportScheduling();
-  const queue = createDailyReportQueue();
+export async function enqueueDailyReportJobs(
+  deps: EnqueueDailyReportsDeps = createDefaultEnqueueDailyReportsDeps(),
+): Promise<EnqueueDailyReportsResult> {
+  const organizations = await deps.listOrganizationsForDailyReportScheduling();
+  const queue = deps.createDailyReportQueue();
 
-  let enqueued = 0;
-  for (const org of organizations) {
-    const reportDate = currentReportDateInTimezone(org.timezone);
-    await queue.add(
-      "daily-report",
-      { organizationId: org.id, reportDate, timezone: org.timezone },
-      { jobId: dailyReportJobId(org.id, reportDate, org.timezone) },
-    );
-    enqueued += 1;
+  let enqueuedCount = 0;
+  try {
+    for (const org of organizations) {
+      const reportDate = currentReportDateInTimezone(org.timezone);
+      await queue.add(
+        "daily-report",
+        { organizationId: org.id, reportDate, timezone: org.timezone },
+        { jobId: dailyReportJobId(org.id, reportDate, org.timezone) },
+      );
+      enqueuedCount += 1;
+    }
+  } finally {
+    await queue.close();
   }
 
-  console.log(`[enqueue-daily-reports] enqueued ${enqueued} daily report job(s) for ${organizations.length} organization(s).`);
-  await queue.close();
+  return { organizationCount: organizations.length, enqueuedCount };
 }
 
-main().catch((err) => {
-  console.error("[enqueue-daily-reports] failed:", err);
-  process.exit(1);
-});
+async function main() {
+  const result = await enqueueDailyReportJobs();
+  console.log(`[enqueue-daily-reports] enqueued ${result.enqueuedCount} daily report job(s) for ${result.organizationCount} organization(s).`);
+}
+
+// See enqueueAll.ts's matching guard for why pathToFileURL is required
+// here instead of a raw `file://${...}` template (Windows path mismatch).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error("[enqueue-daily-reports] failed:", err);
+    process.exit(1);
+  });
+}

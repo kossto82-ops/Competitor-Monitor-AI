@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "enqueue": "tsx src/enqueueAll.ts",
-    "enqueue:reports": "tsx src/enqueueDailyReports.ts"
+    "enqueue:reports": "tsx src/enqueueDailyReports.ts",
+    "scheduler": "tsx src/scheduler.ts"
   },
   "dependencies": {
     "@cma/ai": "*",
