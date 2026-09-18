@@ -8,6 +8,7 @@ import {
   extractVisibleText,
   looksLikeJsShell,
 } from "./structuredData.js";
+import { extractHtmlPromotionEntities, mergeHtmlPromotionsWithJsonLd } from "./htmlPromotions.js";
 import type { Extractor, FetchFn } from "./types.js";
 
 /**
@@ -35,8 +36,14 @@ export class CheerioExtractor implements Extractor {
       const $ = cheerio.load(page.body);
       const visibleText = extractVisibleText($);
       const jsonLdEntities = extractJsonLdEntities($);
-      const entities: ExtractedEntity[] =
+      const baseEntities: ExtractedEntity[] =
         jsonLdEntities.length > 0 ? jsonLdEntities : extractGenericPriceEntities(visibleText);
+      // Phase 24: a second, independent promotion source (bounded HTML
+      // pattern matching) runs regardless of whether JSON-LD produced
+      // anything - real dogfooding showed most competitor pages express
+      // promotions only as styled HTML text, never as schema.org markup.
+      const htmlPromotionEntities = mergeHtmlPromotionsWithJsonLd(jsonLdEntities, extractHtmlPromotionEntities($));
+      const entities: ExtractedEntity[] = [...baseEntities, ...htmlPromotionEntities];
 
       const warnings: string[] = [];
       let confidence = 1;

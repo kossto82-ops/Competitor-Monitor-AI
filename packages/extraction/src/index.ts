@@ -10,3 +10,4 @@ export {
   extractGenericPriceEntities,
   looksLikeJsShell,
 } from "./structuredData.js";
+export { extractHtmlPromotionEntities, mergeHtmlPromotionsWithJsonLd } from "./htmlPromotions.js";
