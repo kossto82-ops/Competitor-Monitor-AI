@@ -41,6 +41,8 @@ export function compareSnapshots(prior: PriorSnapshotData | null, current: Curre
   const changeEvents: ChangeEventDraft[] = [
     ...detectPriceChanges(prior.entities, current.entities),
     ...detectProductAddedOrRemoved(prior.entities, current.entities),
+    ...detectPromotionChanges(prior.entities, current.entities),
+    ...detectPromotionAddedOrRemoved(prior.entities, current.entities),
   ];
 
   const explainedByEntities = changeEvents.length > 0;
@@ -90,11 +92,25 @@ function byKey(entities: ExtractedEntity[]): Map<string, ExtractedEntity> {
   return new Map(entities.map((e) => [e.key, e]));
 }
 
+/**
+ * Restricted to PRICE-type entities on both sides (Phase 23 fix): before
+ * PROMOTION entities existed, this loop's lack of a type filter was
+ * harmless in practice because the only other entity kind sharing this
+ * code path (GENERIC, regex-matched) uses a context-hash key that is
+ * never stable across scans, so a same-key collision with a different
+ * type never happened. PROMOTION entities DO use a stable,
+ * product-scoped key on purpose (so PROMOTION_CHANGE can be detected the
+ * same way) - without this filter, a promotion's own value-changed event
+ * would collide by key and be mis-classified as a PRICE_CHANGE. See
+ * detectPromotionChanges below for the PROMOTION-type equivalent of this
+ * exact diff.
+ */
 function detectPriceChanges(priorEntities: ExtractedEntity[], currentEntities: ExtractedEntity[]): ChangeEventDraft[] {
-  const priorByKey = byKey(priorEntities);
+  const priorByKey = byKey(priorEntities.filter((e) => e.type === "PRICE"));
   const events: ChangeEventDraft[] = [];
 
   for (const current of currentEntities) {
+    if (current.type !== "PRICE") continue;
     const previous = priorByKey.get(current.key);
     if (!previous || previous.value === current.value) continue;
 
@@ -185,6 +201,97 @@ function detectProductAddedOrRemoved(
         currency: previous.currency,
         percentageChange: null,
         evidenceExcerpt: `Product/plan no longer detected on page: ${previous.label} (was ${previous.value ?? "?"} ${previous.currency ?? ""})`.trim(),
+      });
+    }
+  }
+
+  return events;
+}
+
+/**
+ * Phase 23: PROMOTION_CHANGE detection, structurally the same byKey diff
+ * as detectPriceChanges but restricted to PROMOTION-type entities and
+ * WITHOUT a percentage-change computation - a promotion's `value` is a
+ * composed "field=value" signature (see structuredData.ts's
+ * extractPromotionSignal), not a single numeric amount, so there is no
+ * defensible single percentage to derive from a literal string diff.
+ * Same product-scoped `key` as the sibling PRICE entity (both are
+ * `jsonld[-promo]:{name}`), so a price change and a promotion change on
+ * the same product are two independent, correctly co-occurring events -
+ * never merged into one.
+ */
+function detectPromotionChanges(priorEntities: ExtractedEntity[], currentEntities: ExtractedEntity[]): ChangeEventDraft[] {
+  const priorByKey = byKey(priorEntities.filter((e) => e.type === "PROMOTION"));
+  const events: ChangeEventDraft[] = [];
+
+  for (const current of currentEntities) {
+    if (current.type !== "PROMOTION") continue;
+    const previous = priorByKey.get(current.key);
+    if (!previous || previous.value === current.value) continue;
+
+    events.push({
+      changeType: "PROMOTION_CHANGE",
+      severity: "MEDIUM",
+      confidence: 0.75,
+      entityKey: current.key,
+      fieldPath: current.key,
+      oldValue: previous.value,
+      newValue: current.value,
+      currency: current.currency ?? previous.currency,
+      percentageChange: null,
+      evidenceExcerpt: `${previous.label}: ${previous.value ?? "?"} -> ${current.value ?? "?"}`,
+    });
+  }
+
+  return events;
+}
+
+/**
+ * Phase 23: PROMOTION_ADDED / PROMOTION_REMOVED, the same existence-diff
+ * shape as detectProductAddedOrRemoved but over PROMOTION-type entities.
+ * Only JSON-LD-sourced PROMOTION entities exist today (see
+ * structuredData.ts's extractPromotionSignal), and their `key` is
+ * product-name-derived exactly like PRICE's - the same "stable across
+ * scans" property detectProductAddedOrRemoved's doc comment already
+ * relies on applies here unchanged.
+ */
+function detectPromotionAddedOrRemoved(priorEntities: ExtractedEntity[], currentEntities: ExtractedEntity[]): ChangeEventDraft[] {
+  const priorPromotionEntities = priorEntities.filter((e) => e.type === "PROMOTION");
+  const currentPromotionEntities = currentEntities.filter((e) => e.type === "PROMOTION");
+  const priorByKey = byKey(priorPromotionEntities);
+  const currentByKey = byKey(currentPromotionEntities);
+  const events: ChangeEventDraft[] = [];
+
+  for (const current of currentPromotionEntities) {
+    if (!priorByKey.has(current.key)) {
+      events.push({
+        changeType: "PROMOTION_ADDED",
+        severity: "MEDIUM",
+        confidence: 0.75,
+        entityKey: current.key,
+        fieldPath: current.key,
+        oldValue: null,
+        newValue: current.value,
+        currency: current.currency,
+        percentageChange: null,
+        evidenceExcerpt: `New promotion detected: ${current.label} (${current.value ?? "?"})`,
+      });
+    }
+  }
+
+  for (const previous of priorPromotionEntities) {
+    if (!currentByKey.has(previous.key)) {
+      events.push({
+        changeType: "PROMOTION_REMOVED",
+        severity: "MEDIUM",
+        confidence: 0.7,
+        entityKey: previous.key,
+        fieldPath: previous.key,
+        oldValue: previous.value,
+        newValue: null,
+        currency: previous.currency,
+        percentageChange: null,
+        evidenceExcerpt: `Promotion no longer detected on page: ${previous.label} (was ${previous.value ?? "?"})`,
       });
     }
   }

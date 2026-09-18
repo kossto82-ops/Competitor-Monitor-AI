@@ -241,6 +241,42 @@ describe.skipIf(!reachable)("tenant isolation", () => {
     expect(stillA).not.toBeNull();
   });
 
+  /**
+   * Phase 23: the exact same organizationId-scoped WHERE clause already
+   * proven above for CONTENT_CHANGE applies identically to the new
+   * PROMOTION_ADDED/PROMOTION_CHANGE/PROMOTION_REMOVED ChangeTypes - no
+   * new query path was introduced for them (see
+   * packages/db/src/repositories/changeEvents.ts's listChangeEventsForOrg,
+   * unmodified), but this test makes that explicit for the new enum values
+   * rather than leaving it merely implied.
+   */
+  it("never leaks another org's PROMOTION_CHANGE events through a tenant-scoped query", async () => {
+    const a = await makeTenantWithFullChain("A11");
+    const b = await makeTenantWithFullChain("B11");
+
+    const promotionEvent = await prisma.changeEvent.create({
+      data: {
+        organizationId: a.organization.id,
+        monitoredUrlId: a.monitoredUrl.id,
+        currentSnapshotId: a.snapshot.id,
+        changeType: "PROMOTION_CHANGE",
+        severity: "MEDIUM",
+        confidence: 0.75,
+        entityKey: "jsonld-promo:pro plan",
+        fieldPath: "jsonld-promo:pro plan",
+        oldValue: "discount=10",
+        newValue: "discount=20",
+        evidenceExcerpt: "Pro Plan: discount=10 -> discount=20",
+      },
+    });
+
+    const asOrgB = await listChangeEventsForOrg(b.organization.id, { monitoredUrlId: a.monitoredUrl.id });
+    expect(asOrgB.map((e) => e.id)).not.toContain(promotionEvent.id);
+
+    const asOrgA = await listChangeEventsForOrg(a.organization.id, { monitoredUrlId: a.monitoredUrl.id });
+    expect(asOrgA.map((e) => e.id)).toContain(promotionEvent.id);
+  });
+
   it("prevents org B from deleting org A's monitored URL or snapshot the same way", async () => {
     const a = await makeTenantWithFullChain("A9");
     const b = await makeTenantWithFullChain("B9");

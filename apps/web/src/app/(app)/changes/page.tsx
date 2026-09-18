@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { GitCompareArrows } from "lucide-react";
+import { CHANGE_TYPES } from "@cma/core";
 import { listChangeEventsForOrg, listCompetitorsForOrg } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card } from "@/components/ui/Card";
@@ -7,8 +8,6 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { changeTypeDisplay, severityDisplay, summarizeChangeEvent } from "@/lib/statusDisplay";
 import { formatDateTime } from "@/lib/formatTime";
-
-const CHANGE_TYPES = ["PRICE_CHANGE", "PRODUCT_ADDED", "PRODUCT_REMOVED", "PROMOTION_CHANGE", "CONTENT_CHANGE"] as const;
 
 interface PageProps {
   searchParams: Promise<{ competitorId?: string; changeType?: string; from?: string; to?: string }>;

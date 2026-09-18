@@ -72,15 +72,32 @@ function collectProductLikeEntities(node: unknown, out: ExtractedEntity[], raw: 
 
   const type = typeof obj["@type"] === "string" ? (obj["@type"] as string) : undefined;
   const name = typeof obj["name"] === "string" ? (obj["name"] as string) : undefined;
+  const isCommercialEntity = type !== undefined && COMMERCIAL_OFFER_TYPES.has(type);
 
   const offer = extractOffer(obj["offers"]);
-  if (offer && type !== undefined && COMMERCIAL_OFFER_TYPES.has(type)) {
+  if (offer && isCommercialEntity) {
     out.push({
       type: "PRICE",
       key: `jsonld:${name ?? "unknown"}`.toLowerCase(),
       label: name ?? "Unnamed product",
       value: offer.price,
       currency: offer.currency,
+      raw,
+    });
+  }
+
+  // Phase 23: same commercial-entity gate as the PRICE entity above (see
+  // COMMERCIAL_OFFER_TYPES's doc comment / Phase 22 dogfooding finding) -
+  // a promotion attached to a non-commercial node (Organization,
+  // SoftwareApplication SEO offer, etc.) is never captured.
+  const promotion = isCommercialEntity ? extractPromotionSignal(obj["offers"]) : null;
+  if (promotion) {
+    out.push({
+      type: "PROMOTION",
+      key: `jsonld-promo:${name ?? "unknown"}`.toLowerCase(),
+      label: name ?? "Unnamed product",
+      value: promotion.summary,
+      currency: promotion.currency,
       raw,
     });
   }
@@ -101,6 +118,79 @@ function extractOffer(offers: unknown): { price: string; currency: string | null
   if (price === undefined || price === null) return null;
   const currency = typeof obj["priceCurrency"] === "string" ? (obj["priceCurrency"] as string) : null;
   return { price: String(price), currency };
+}
+
+/**
+ * The four schema.org `Offer` fields that genuinely, unambiguously
+ * signal a promotional/temporary commercial condition rather than a
+ * plain standing price. Deliberately NOT included: `description`
+ * (arbitrary free text - the exact kind of unbounded signal Phase 22's
+ * dogfooding showed produces false positives) and `availability` (present
+ * on virtually every Offer regardless of any promotion, would fire on
+ * almost every page). A site's own wording ("Save 20%", "3 months on us")
+ * is real evidence when it lives inside one of these four fields - schema.org
+ * authors put it there specifically to describe the commercial condition -
+ * but the same sentence sitting in a generic `description` is not
+ * distinguishable from ordinary marketing copy without semantic
+ * interpretation, which this deterministic layer does not perform.
+ */
+const PROMOTION_SIGNAL_FIELDS = ["discount", "discountCode", "priceValidUntil", "eligibleDuration"] as const;
+
+/**
+ * Normalizes one of the four signal fields to a short, deterministic
+ * string. `eligibleDuration` in particular is commonly a nested
+ * QuantitativeValue object (`{ "@type": "QuantitativeValue", "value": 1,
+ * "unitCode": "MON" }`, e.g. "1 month free") - flattened to `1 MON` here
+ * rather than JSON-stringified so the same duration always normalizes to
+ * the same literal string across scans/sites, and a malformed/partial
+ * object degrades to `null` (excluded) rather than throwing.
+ */
+function normalizePromotionFieldValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const amount = obj["value"];
+    const unit = obj["unitCode"] ?? obj["unitText"];
+    if ((typeof amount === "number" || typeof amount === "string") && typeof unit === "string") {
+      return `${amount} ${unit}`;
+    }
+    // No recognizable QuantitativeValue shape - don't guess at a
+    // representation for an arbitrary nested object.
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Builds a deterministic, sorted `field=value; field=value` signature
+ * from whichever of PROMOTION_SIGNAL_FIELDS are actually present on the
+ * offer - returns null (no PROMOTION entity at all) unless at least one
+ * signal field is present, per the module's false-positive-avoidance
+ * principle (Section 6 of the Phase 23 brief: "False negatives are
+ * preferable to fabricated continuity"). The composed string is never
+ * semantically interpreted (a "20" vs "20%" vs "0.2" discount are three
+ * distinct literal strings, not reconciled) - see compare.ts's
+ * detectPromotionChanges for how this string is later diffed.
+ */
+function extractPromotionSignal(offers: unknown): { summary: string; currency: string | null } | null {
+  const offer = Array.isArray(offers) ? offers[0] : offers;
+  if (!offer || typeof offer !== "object") return null;
+  const obj = offer as Record<string, unknown>;
+
+  const parts: string[] = [];
+  for (const field of PROMOTION_SIGNAL_FIELDS) {
+    const normalized = normalizePromotionFieldValue(obj[field]);
+    if (normalized !== null) parts.push(`${field}=${normalized}`);
+  }
+  if (parts.length === 0) return null;
+
+  const currency = typeof obj["priceCurrency"] === "string" ? (obj["priceCurrency"] as string) : null;
+  return { summary: parts.join("; "), currency };
 }
 
 /**

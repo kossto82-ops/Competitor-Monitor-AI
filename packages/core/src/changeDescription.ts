@@ -31,8 +31,12 @@ export function describeChangeEvent(event: ChangeEventForDescription): string {
       return `New item detected: ${formatMoney(newValue, currency)}`;
     case "PRODUCT_REMOVED":
       return `An item is no longer listed (was ${formatMoney(oldValue, currency)})`;
+    case "PROMOTION_ADDED":
+      return `A new promotion appeared: ${newValue ?? "—"}`;
     case "PROMOTION_CHANGE":
-      return "A promotion changed";
+      return `A promotion changed from "${oldValue ?? "—"}" to "${newValue ?? "—"}"`;
+    case "PROMOTION_REMOVED":
+      return `A promotion is no longer listed (was "${oldValue ?? "—"}")`;
     case "CONTENT_CHANGE":
       return "The page's visible text changed";
     default:

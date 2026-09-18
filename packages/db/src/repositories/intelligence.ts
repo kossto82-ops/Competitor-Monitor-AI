@@ -27,7 +27,15 @@ import {
   type SustainedActivityTrend,
 } from "./patterns.js";
 
-const CHANGE_TYPES: ChangeType[] = ["PRICE_CHANGE", "PRODUCT_ADDED", "PRODUCT_REMOVED", "PROMOTION_CHANGE", "CONTENT_CHANGE"];
+const CHANGE_TYPES: ChangeType[] = [
+  "PRICE_CHANGE",
+  "PRODUCT_ADDED",
+  "PRODUCT_REMOVED",
+  "PROMOTION_ADDED",
+  "PROMOTION_CHANGE",
+  "PROMOTION_REMOVED",
+  "CONTENT_CHANGE",
+];
 
 export interface ChangeTypeBreakdown {
   changeType: ChangeType;

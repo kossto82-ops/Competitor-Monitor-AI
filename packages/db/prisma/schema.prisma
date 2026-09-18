@@ -63,7 +63,15 @@ enum ChangeType {
   PRICE_CHANGE
   PRODUCT_ADDED
   PRODUCT_REMOVED
+  // Phase 23: a promotion/offer that was previously absent on a
+  // commercial entity becomes observable.
+  PROMOTION_ADDED
+  // A previously observed promotion/offer changes materially (e.g. a
+  // discount percentage or an eligible free-trial duration changes).
   PROMOTION_CHANGE
+  // A previously observed promotion/offer is no longer observable on
+  // the same commercial entity.
+  PROMOTION_REMOVED
   CONTENT_CHANGE
 }
 

@@ -14,6 +14,18 @@ function priceEntity(overrides: Partial<ExtractedEntity> = {}): ExtractedEntity 
   };
 }
 
+function promotionEntity(overrides: Partial<ExtractedEntity> = {}): ExtractedEntity {
+  return {
+    type: "PROMOTION",
+    key: "jsonld-promo:pro plan",
+    label: "Pro Plan",
+    value: "discount=10",
+    currency: "EUR",
+    raw: "{}",
+    ...overrides,
+  };
+}
+
 function makeCurrent(overrides: Partial<CurrentExtractionData> = {}): CurrentExtractionData {
   return {
     httpStatus: 200,
@@ -180,5 +192,98 @@ describe("compareSnapshots - product add/remove", () => {
     expect(result.changeEvents.some((e) => e.changeType === "PRODUCT_ADDED" || e.changeType === "PRODUCT_REMOVED")).toBe(
       false,
     );
+  });
+});
+
+/**
+ * Phase 23: Commercial Offer & Promotion Intelligence. Same byKey-diff
+ * shape as price/product detection, but for the PROMOTION entity type
+ * that structuredData.ts's extractPromotionSignal produces - see
+ * compare.ts's detectPromotionChanges/detectPromotionAddedOrRemoved doc
+ * comments.
+ */
+describe("compareSnapshots - promotion added/changed/removed", () => {
+  it("detects a newly added promotion as PROMOTION_ADDED", () => {
+    const prior = makePrior({ entities: [priceEntity()] });
+    const current = makeCurrent({
+      contentHash: "hash-b",
+      structuredDataHash: "struct-b",
+      entities: [priceEntity(), promotionEntity()],
+    });
+    const result = compareSnapshots(prior, current);
+    const added = result.changeEvents.find((e) => e.changeType === "PROMOTION_ADDED");
+    expect(added).toBeDefined();
+    expect(added!.newValue).toBe("discount=10");
+    expect(added!.oldValue).toBeNull();
+  });
+
+  it("detects a materially changed promotion as PROMOTION_CHANGE, distinct from PRODUCT/PRICE events", () => {
+    const prior = makePrior({ entities: [priceEntity(), promotionEntity({ value: "discount=10" })] });
+    const current = makeCurrent({
+      contentHash: "hash-b",
+      structuredDataHash: "struct-b",
+      entities: [priceEntity(), promotionEntity({ value: "discount=20" })],
+    });
+    const result = compareSnapshots(prior, current);
+    const changed = result.changeEvents.find((e) => e.changeType === "PROMOTION_CHANGE");
+    expect(changed).toBeDefined();
+    expect(changed!.oldValue).toBe("discount=10");
+    expect(changed!.newValue).toBe("discount=20");
+    expect(result.changeEvents.some((e) => e.changeType === "PROMOTION_ADDED" || e.changeType === "PROMOTION_REMOVED")).toBe(
+      false,
+    );
+    expect(result.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(false);
+  });
+
+  it("detects a removed promotion as PROMOTION_REMOVED, even while the underlying price stays unchanged", () => {
+    const prior = makePrior({ entities: [priceEntity(), promotionEntity()] });
+    const current = makeCurrent({
+      contentHash: "hash-b",
+      structuredDataHash: "struct-b",
+      entities: [priceEntity()], // promotion gone, price identical
+    });
+    const result = compareSnapshots(prior, current);
+    const removed = result.changeEvents.find((e) => e.changeType === "PROMOTION_REMOVED");
+    expect(removed).toBeDefined();
+    expect(removed!.oldValue).toBe("discount=10");
+    expect(removed!.newValue).toBeNull();
+    expect(result.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(false);
+  });
+
+  it("does not emit any promotion event when the promotion value is unchanged", () => {
+    const prior = makePrior({ entities: [promotionEntity()] });
+    const current = makeCurrent({
+      contentHash: "hash-b",
+      structuredDataHash: "struct-a",
+      normalizedContent: "different visible text but promotion identical",
+      entities: [promotionEntity()],
+    });
+    const result = compareSnapshots(prior, current);
+    expect(
+      result.changeEvents.some((e) => e.changeType === "PROMOTION_ADDED" || e.changeType === "PROMOTION_CHANGE" || e.changeType === "PROMOTION_REMOVED"),
+    ).toBe(false);
+  });
+
+  it("emits both PRICE_CHANGE and PROMOTION_CHANGE when both change simultaneously on the same product", () => {
+    const prior = makePrior({ entities: [priceEntity({ value: "49.00" }), promotionEntity({ value: "discount=10" })] });
+    const current = makeCurrent({
+      contentHash: "hash-b",
+      structuredDataHash: "struct-b",
+      entities: [priceEntity({ value: "39.00" }), promotionEntity({ value: "discount=20" })],
+    });
+    const result = compareSnapshots(prior, current);
+    expect(result.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(true);
+    expect(result.changeEvents.some((e) => e.changeType === "PROMOTION_CHANGE")).toBe(true);
+    // exactly one of each - never duplicated
+    expect(result.changeEvents.filter((e) => e.changeType === "PRICE_CHANGE")).toHaveLength(1);
+    expect(result.changeEvents.filter((e) => e.changeType === "PROMOTION_CHANGE")).toHaveLength(1);
+  });
+
+  it("never emits a promotion event on FAILED_TO_VERIFY (a fetch failure is never mistaken for a promotion removal)", () => {
+    const prior = makePrior({ entities: [promotionEntity()] });
+    const current = makeCurrent({ errorMessage: "Request timed out", entities: [] });
+    const result = compareSnapshots(prior, current);
+    expect(result.verificationState).toBe("FAILED_TO_VERIFY");
+    expect(result.changeEvents).toHaveLength(0);
   });
 });

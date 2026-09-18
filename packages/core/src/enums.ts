@@ -23,7 +23,9 @@ export const CHANGE_TYPES = [
   "PRICE_CHANGE",
   "PRODUCT_ADDED",
   "PRODUCT_REMOVED",
+  "PROMOTION_ADDED",
   "PROMOTION_CHANGE",
+  "PROMOTION_REMOVED",
   "CONTENT_CHANGE",
 ] as const;
 export type ChangeType = (typeof CHANGE_TYPES)[number];
