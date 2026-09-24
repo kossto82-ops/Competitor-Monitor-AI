@@ -153,8 +153,8 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
     await tx.monitoredUrl.update({
       where: { id: monitoredUrlId },
       data: fetchSucceeded
-        ? { lastSuccessfulScanAt: new Date(), consecutiveFailureCount: 0 }
-        : { consecutiveFailureCount: { increment: 1 } },
+        ? { lastSuccessfulScanAt: new Date(), consecutiveFailureCount: 0, lastAttemptAt: new Date() }
+        : { consecutiveFailureCount: { increment: 1 }, lastAttemptAt: new Date() },
     });
 
     return snapshot;

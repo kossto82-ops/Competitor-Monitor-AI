@@ -8,6 +8,7 @@ import {
   deleteMonitoredUrlIfSafe,
   getMonitoredUrlForOrg,
   listDueMonitoredUrls,
+  monitoringBackoffMs,
   updateMonitoredUrl,
 } from "./monitoredUrls.js";
 
@@ -146,6 +147,70 @@ describe.skipIf(!reachable)("monitoredUrls repository (Phase 5)", () => {
 
       const due = await listDueMonitoredUrls();
       expect(due.map((u) => u.id)).not.toContain(url.id);
+    });
+
+    it("excludes a URL whose last attempt is inside its backoff window (repeatedly failing)", async () => {
+      const { organization, competitor } = await makeOrgWithCompetitor("due-backoff-recent");
+      const url = await createMonitoredUrl(organization.id, competitor.id, { url: "https://due-backoff.example.test/pricing", category: "GENERAL" });
+      // Two consecutive failures 10 minutes ago -> backoff 30m -> NOT due yet.
+      await prisma.monitoredUrl.update({
+        where: { id: url.id },
+        data: { lastAttemptAt: new Date(Date.now() - 10 * 60_000), consecutiveFailureCount: 2 },
+      });
+
+      const due = await listDueMonitoredUrls();
+      expect(due.map((u) => u.id)).not.toContain(url.id);
+    });
+
+    it("includes a URL whose last attempt is older than its backoff window", async () => {
+      const { organization, competitor } = await makeOrgWithCompetitor("due-backoff-mature");
+      const url = await createMonitoredUrl(organization.id, competitor.id, { url: "https://due-backoff-mature.example.test/pricing", category: "GENERAL" });
+      // Two consecutive failures 40 minutes ago -> backoff 30m -> due again.
+      await prisma.monitoredUrl.update({
+        where: { id: url.id },
+        data: { lastAttemptAt: new Date(Date.now() - 40 * 60_000), consecutiveFailureCount: 2 },
+      });
+
+      const due = await listDueMonitoredUrls();
+      expect(due.map((u) => u.id)).toContain(url.id);
+    });
+
+    it("caps backoff at 24 hours for a permanently-failing URL (high consecutiveFailureCount)", async () => {
+      const { organization, competitor } = await makeOrgWithCompetitor("due-backoff-capped");
+      const url = await createMonitoredUrl(organization.id, competitor.id, { url: "https://due-backoff-capped.example.test/pricing", category: "GENERAL" });
+      // 41 consecutive failures (observed live for a bot-blocked URL),
+      // last attempt 23 hours ago -> still inside the capped 24h window.
+      await prisma.monitoredUrl.update({
+        where: { id: url.id },
+        data: { lastAttemptAt: new Date(Date.now() - 23 * 60 * 60_000), consecutiveFailureCount: 41 },
+      });
+
+      const due = await listDueMonitoredUrls();
+      expect(due.map((u) => u.id)).not.toContain(url.id);
+
+      // Move past the cap -> due again.
+      await prisma.monitoredUrl.update({
+        where: { id: url.id },
+        data: { lastAttemptAt: new Date(Date.now() - 25 * 60 * 60_000) },
+      });
+      const dueAfter = await listDueMonitoredUrls();
+      expect(dueAfter.map((u) => u.id)).toContain(url.id);
+    });
+  });
+
+  describe("monitoringBackoffMs", () => {
+    it("returns 0 for a healthy URL (no failures)", async () => {
+      expect(monitoringBackoffMs(0)).toBe(0);
+    });
+
+    it("grows exponentially with the failure count", async () => {
+      expect(monitoringBackoffMs(1)).toBe(15 * 60_000);
+      expect(monitoringBackoffMs(2)).toBe(30 * 60_000);
+      expect(monitoringBackoffMs(4)).toBe(2 * 60 * 60_000);
+    });
+
+    it("caps at 24 hours", async () => {
+      expect(monitoringBackoffMs(41)).toBe(24 * 60 * 60_000);
     });
   });
 });

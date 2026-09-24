@@ -220,6 +220,12 @@ model MonitoredUrl {
   isActive                Boolean     @default(true)
   lastSuccessfulScanAt    DateTime?
   consecutiveFailureCount Int         @default(0)
+  // Phase 28.1 addition: timestamp of the most recent scan attempt,
+  // success or failure. Anchors the scheduler's exponential backoff for
+  // URLs that keep failing (fetch/verification failures never advance
+  // lastSuccessfulScanAt, so without this anchor a failing URL is "due"
+  // forever and gets re-enqueued every scheduler tick).
+  lastAttemptAt           DateTime?
   createdAt               DateTime    @default(now())
   updatedAt               DateTime    @updatedAt
 

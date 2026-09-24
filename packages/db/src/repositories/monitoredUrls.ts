@@ -54,16 +54,54 @@ export async function listAllActiveMonitoredUrls() {
  * history). Deliberately NOT tenant-scoped, same reason as
  * listAllActiveMonitoredUrls above - this is the scheduler's entry
  * point (apps/worker/src/enqueueAll.ts), never a per-tenant API route.
+ *
+ * Phase 28.1 (backoff): a URL that keeps failing must NOT stay "due"
+ * forever. A fetch/verification failure never advances
+ * lastSuccessfulScanAt (it only increments consecutiveFailureCount), so
+ * without this a permanently-failing URL was re-enqueued on EVERY
+ * scheduler tick - observed live for a bot-blocked URL this way
+ * (consecutiveFailureCount climbing to 41, a new FAILED_TO_VERIFY
+ * snapshot every 15 minutes). The backoff is exponential in the failure
+ * count, anchored on lastAttemptAt (the most recent attempt, success or
+ * failure), capped at 24h. A URL in a failure streak is thereby retried
+ * on the immediate next tick for the first failure and held back
+ * progressively afterwards - exactly the throttle the healthy-cadence
+ * rule alone cannot express, because a failing URL never has a fresh
+ * lastSuccessfulScanAt to measure from. Healthy URLs (count 0) are
+ * unaffected: the backoff window is zero and the original success
+ * cadence applies unchanged.
  */
 export async function listDueMonitoredUrls(now: Date = new Date()) {
   const urls = await prisma.monitoredUrl.findMany({
     where: { isActive: true, competitor: { isActive: true } },
   });
   return urls.filter((url) => {
-    if (!url.lastSuccessfulScanAt) return true;
-    const dueAt = new Date(url.lastSuccessfulScanAt.getTime() + url.scanFrequencyMinutes * 60_000);
+    if (!url.lastSuccessfulScanAt && !url.lastAttemptAt) return true;
+    const backoffMs = monitoringBackoffMs(url.consecutiveFailureCount);
+    const sinceLastAttempt = url.lastAttemptAt ? url.lastAttemptAt.getTime() : 0;
+    const attemptedRecently = sinceLastAttempt > 0 && now.getTime() - sinceLastAttempt < backoffMs;
+    if (attemptedRecently) {
+      return false;
+    }
+    const dueAt = new Date((url.lastSuccessfulScanAt?.getTime() ?? 0) + url.scanFrequencyMinutes * 60_000);
     return dueAt <= now;
   });
+}
+
+/**
+ * Exponential backoff for a URL currently in a consecutive-failure
+ * streak: 15m, 30m, 1h, 2h, 4h, 8h, then a 16h/24h cap. The 15m base
+ * matches the scheduler's own tick interval (apps/worker/src/scheduler.ts
+ * DEFAULT_MONITORING_INTERVAL_MS), so the very first failure is retried
+ * on the immediate next tick exactly as before - backoff only kicks in
+ * once a URL is *repeatedly* failing.
+ */
+export function monitoringBackoffMs(consecutiveFailureCount: number): number {
+  if (consecutiveFailureCount <= 0) return 0;
+  const BASE_MS = 15 * 60_000; // one scheduler tick
+  const MAX_MS = 24 * 60 * 60_000; // 24h cap
+  const exponent = Math.min(consecutiveFailureCount - 1, 10);
+  return Math.min(BASE_MS * 2 ** exponent, MAX_MS);
 }
 
 /** Phase 5 (Section 4): editing an existing monitored URL - label, category, frequency, and pause/resume (`isActive`). */
