@@ -18,3 +18,13 @@ export {
   type SafePostJsonOptions,
   type SafeFetchResult,
 } from "./safeFetch.js";
+
+export {
+  assertStartupConfig,
+  checkStartupConfig,
+  describeSecretProblem,
+  InsecureConfigurationError,
+  MIN_SECRET_LENGTH,
+  type StartupCheckOptions,
+  type StartupCheckResult,
+} from "./startupChecks.js";

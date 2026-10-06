@@ -29,3 +29,6 @@ apps/**/CLAUDE.md
 # something to commit or ship. See README's "No Docker available" section.
 .local-infra/
 
+
+# Redis snapshots (job payloads, organization ids) - never commit
+*.rdb

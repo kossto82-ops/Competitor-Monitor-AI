@@ -1,21 +1,43 @@
+# Local/dev infrastructure. Both services listen on 127.0.0.1 ONLY (never on
+# all interfaces) and require credentials taken from your .env - there are no
+# built-in defaults. Redis is the job queue: anyone who can reach it can inject
+# jobs for any organization, so it must never be exposed.
+#
+# To run behind a reverse proxy or on a server, keep these ports closed to the
+# outside and put the app and worker on the same private network.
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: competitor_monitor
+      POSTGRES_USER: ${POSTGRES_USER:-cma}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-competitor_monitor}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in your .env (see .env.example)}
+    # The password is read from the environment inside the container so it never
+    # appears in the process list of the compose file or needs shell quoting here.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:

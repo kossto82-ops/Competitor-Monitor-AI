@@ -18,11 +18,20 @@ import {
   getDigestAiInterpretationForOrgOrThrow,
   markDigestAiInterpretationFailed,
 } from "@cma/db";
+import { assertStartupConfig } from "@cma/security";
 import type { Job } from "bullmq";
 import { runMonitoringJob } from "./pipeline.js";
 import { runAiAnalysisJob } from "./aiPipeline.js";
 import { generateDailyReportJob } from "./reportPipeline.js";
 import { runDigestInterpretationJob } from "./digestInterpretationPipeline.js";
+
+// Refuse to run with a placeholder/short/reused secret or default production credentials (Phase 29 / A4).
+try {
+  assertStartupConfig(process.env, { needsAuthSecret: false });
+} catch (err) {
+  console.error(`[worker] refusing to start. ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+}
 
 const worker = createMonitoringWorker(async (job: Job<MonitoringJobPayload>) => {
   const result = await runMonitoringJob(job.data);
