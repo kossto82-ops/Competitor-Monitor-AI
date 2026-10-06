@@ -104,6 +104,13 @@ const reportWorker = createDailyReportWorker(async (job: Job<DailyReportJobPaylo
     `[report-worker] job=${job.id} organizationId=${job.data.organizationId} reportDate=${job.data.reportDate} ` +
       `status=${result.status} changes=${result.changeCount} email=${result.emailOutcome}`,
   );
+  // The report is already saved and COMPLETED; a failed delivery is the only
+  // thing left to retry. Throwing hands it to BullMQ's attempts/backoff, and
+  // the re-entry skips generation and re-sends (the NotificationLog row is
+  // FAILED, not SENT, so reserveReportEmailNotification allows it).
+  if (result.emailOutcome === "FAILED") {
+    throw new Error(`Report ${result.reportId} was saved but its email could not be delivered`);
+  }
   return result;
 });
 

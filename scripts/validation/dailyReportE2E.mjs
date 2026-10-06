@@ -20,6 +20,10 @@
 //        CMA_AI_MODEL=gpt-4o-mini node scripts/validation/dailyReportE2E.mjs
 //
 // Requires: real Postgres + Redis reachable, migrations applied.
+//
+// Email delivery is not configured by default (reports are then SKIPPED_NOT_CONFIGURED,
+// never SENT), so this driver opts into the log-only console provider explicitly.
+process.env.CMA_EMAIL_PROVIDER ??= "console";
 
 import {
   prisma,

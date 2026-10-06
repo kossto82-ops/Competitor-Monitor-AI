@@ -62,18 +62,17 @@ export function buildDailyReportEmail(input: BuildReportEmailInput): EmailMessag
       for (const change of group.changes) {
         // Section 18: the deterministic fact leads, on its own line.
         textLines.push(describeChangeEvent(change));
+        // AI is on demand: an interpretation appears only if the user already
+        // requested one. Its absence is the normal state, not a failure, so
+        // nothing is rendered in its place.
         if (change.aiSummary) {
           textLines.push(`AI interpretation: ${change.aiSummary}`);
-        } else {
-          textLines.push("AI interpretation unavailable.");
         }
         textLines.push("");
 
         rows.push(
           `<li><strong>${escapeHtml(describeChangeEvent(change))}</strong><br/>` +
-            (change.aiSummary
-              ? `<span>AI interpretation: ${escapeHtml(change.aiSummary)}</span>`
-              : `<span style="color:#94a3b8">AI interpretation unavailable.</span>`) +
+            (change.aiSummary ? `<span>AI interpretation: ${escapeHtml(change.aiSummary)}</span>` : "") +
             `</li>`,
         );
       }

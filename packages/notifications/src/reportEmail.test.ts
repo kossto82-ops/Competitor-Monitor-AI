@@ -51,7 +51,7 @@ describe("buildDailyReportEmail", () => {
     expect(email.html).toContain("Price changed from €49 to €59 (+20.41%)");
   });
 
-  it("shows 'AI interpretation unavailable' rather than omitting the change when aiSummary is null (Section 7/8)", () => {
+  it("keeps the change and omits any AI line when aiSummary is null (AI is on demand, its absence is not a failure)", () => {
     const email = buildDailyReportEmail({
       organizationName: "Acme Inc",
       reportDateLabel: "16 September 2026",
@@ -63,7 +63,8 @@ describe("buildDailyReportEmail", () => {
     });
 
     expect(email.text).toContain("Price changed from €49 to €59 (+20.41%)");
-    expect(email.text).toContain("AI interpretation unavailable.");
+    expect(email.text).not.toContain("AI interpretation");
+    expect(email.html).not.toContain("AI interpretation");
   });
 
   it("renders 'no verified changes' content, without any per-change section, when the change list is empty (Section 21)", () => {

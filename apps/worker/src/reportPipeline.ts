@@ -1,7 +1,7 @@
 import { resolveOrgLocalDayWindow } from "@cma/core";
 import * as db from "@cma/db";
 import type { DailyReportJobPayload } from "@cma/queue";
-import { buildDailyReportEmail, createEmailProviderFromEnv, type EmailProvider, type ReportEmailChangeInput } from "@cma/notifications";
+import { buildDailyReportEmail, createEmailProviderFromEnv, isEmailProviderConfigured, type EmailProvider, type ReportEmailChangeInput } from "@cma/notifications";
 
 interface ChangeEventForEmailLike {
   id: string;
@@ -28,7 +28,7 @@ function toReportEmailChangeInput(event: ChangeEventForEmailLike): ReportEmailCh
     percentageChange: event.percentageChange,
     monitoredUrlLabel: event.monitoredUrl.label,
     // Section 7/8: AI is enrichment - only a COMPLETED analysis's summary is ever shown; a
-    // missing or FAILED analysis renders as "AI interpretation unavailable" (see buildDailyReportEmail).
+    // missing or FAILED analysis renders no AI line at all (see buildDailyReportEmail).
     aiSummary: event.aiAnalysis?.status === "COMPLETED" ? (event.aiAnalysis.summary ?? null) : null,
     aiConfidence: event.aiAnalysis?.status === "COMPLETED" ? (event.aiAnalysis.confidence ?? null) : null,
   };
@@ -39,7 +39,7 @@ function formatReportDateLabel(reportDate: Date): string {
   return new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(reportDate);
 }
 
-export type ReportEmailOutcome = "SENT" | "FAILED" | "SKIPPED_ALREADY_SENT" | "SKIPPED_NO_RECIPIENT";
+export type ReportEmailOutcome = "SENT" | "FAILED" | "SKIPPED_ALREADY_SENT" | "SKIPPED_NO_RECIPIENT" | "SKIPPED_NOT_CONFIGURED";
 
 export interface GenerateDailyReportResult {
   reportId: string;
@@ -152,6 +152,11 @@ async function attemptReportEmailDelivery(
   reportId: string,
   deps: ReportPipelineDeps,
 ): Promise<ReportEmailOutcome> {
+  // No delivery channel configured: nothing can leave the machine, so no
+  // NotificationLog row is written and the report is never recorded as SENT.
+  // The report itself stays fully available in the web app.
+  if (!isEmailProviderConfigured(deps.emailProvider)) return "SKIPPED_NOT_CONFIGURED";
+
   const recipient = await deps.getReportRecipientEmailForOrg(organizationId);
   if (!recipient) return "SKIPPED_NO_RECIPIENT";
 

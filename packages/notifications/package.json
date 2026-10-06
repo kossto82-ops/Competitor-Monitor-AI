@@ -11,10 +11,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@cma/core": "*"
+    "@cma/core": "*",
+    "nodemailer": "^10.0.15"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.9.0",
     "@types/node": "^22.9.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/smtp-server": "^3.5.13",
+    "mailparser": "^3.9.36",
+    "smtp-server": "^3.19.17",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
   }

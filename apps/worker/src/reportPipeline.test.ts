@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { EmailMessage, EmailProvider } from "@cma/notifications";
+import { NotConfiguredEmailProvider, type EmailMessage, type EmailProvider } from "@cma/notifications";
 import type { DailyReportJobPayload } from "@cma/queue";
 import { generateDailyReportJob, type ReportPipelineDeps } from "./reportPipeline.js";
 
@@ -109,7 +109,7 @@ describe("generateDailyReportJob", () => {
     expect(sentEmail?.text).toContain("No verified competitor changes detected.");
   });
 
-  it("Section 7/8: a ChangeEvent whose AiAnalysis is missing still appears in the email as an 'unavailable' interpretation, never dropped", async () => {
+  it("Section 7/8: a ChangeEvent whose AiAnalysis is missing still appears in the email, with no AI line, never dropped", async () => {
     const deps = makeDeps({
       getReportWithItemsForOrg: vi.fn().mockResolvedValue({
         id: "report-1",
@@ -124,10 +124,10 @@ describe("generateDailyReportJob", () => {
     expect(result.emailOutcome).toBe("SENT");
     const sentEmail = (deps.emailProvider as FakeEmailProvider).sent[0];
     expect(sentEmail?.text).toContain("Price changed from €49 to €59");
-    expect(sentEmail?.text).toContain("AI interpretation unavailable.");
+    expect(sentEmail?.text).not.toContain("AI interpretation");
   });
 
-  it("Section 7/8: a FAILED AiAnalysis is treated the same as missing - never shown as if it were a real interpretation", async () => {
+  it("Section 7/8: a FAILED AiAnalysis is treated the same as missing - no AI line, never shown as if it were a real interpretation", async () => {
     const deps = makeDeps({
       getReportWithItemsForOrg: vi.fn().mockResolvedValue({
         id: "report-1",
@@ -145,7 +145,7 @@ describe("generateDailyReportJob", () => {
     });
     await generateDailyReportJob(PAYLOAD, deps);
     const sentEmail = (deps.emailProvider as FakeEmailProvider).sent[0];
-    expect(sentEmail?.text).toContain("AI interpretation unavailable.");
+    expect(sentEmail?.text).not.toContain("AI interpretation");
   });
 
   it("a COMPLETED AiAnalysis's summary IS shown", async () => {
@@ -195,6 +195,17 @@ describe("generateDailyReportJob", () => {
     expect(result.status).toBe("COMPLETED");
     expect(result.emailOutcome).toBe("SKIPPED_NO_RECIPIENT");
     expect(deps.reserveReportEmailNotification).not.toHaveBeenCalled();
+  });
+
+  it("with no email delivery configured the report is still generated, nothing is recorded as SENT, and no recipient lookup or notification row is created", async () => {
+    const deps = makeDeps({ emailProvider: new NotConfiguredEmailProvider("CMA_EMAIL_SMTP_HOST is not set") });
+    const result = await generateDailyReportJob(PAYLOAD, deps);
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.emailOutcome).toBe("SKIPPED_NOT_CONFIGURED");
+    expect(deps.getReportRecipientEmailForOrg).not.toHaveBeenCalled();
+    expect(deps.reserveReportEmailNotification).not.toHaveBeenCalled();
+    expect(deps.markReportEmailSent).not.toHaveBeenCalled();
   });
 
   it("Section 17: an email send failure is isolated - the report stays COMPLETED, the job does not throw, and the failure is recorded", async () => {
