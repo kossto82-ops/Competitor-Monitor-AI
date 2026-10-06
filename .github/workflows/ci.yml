@@ -89,14 +89,13 @@ jobs:
 
       # Re-run the infrastructure-backed workspaces with a machine-readable report and fail if
       # anything was skipped (a skipped suite means the database/Redis was not actually used).
+      # The helper prints the offending test names as annotations.
       - name: Verify infrastructure-backed tests were not skipped
         run: |
+          status=0
           for ws in packages/db packages/queue apps/web; do
-            npm run test --workspace "$ws" -- --reporter=json --outputFile="$RUNNER_TEMP/vitest-$(basename "$ws").json"
-            node -e '
-              const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-              const skipped = r.numPendingTests + r.numTodoTests;
-              console.log(process.argv[2] + ": " + r.numPassedTests + " passed, " + skipped + " skipped");
-              if (r.numFailedTests > 0 || skipped > 0) process.exit(1);
-            ' "$RUNNER_TEMP/vitest-$(basename "$ws").json" "$ws"
+            report="$RUNNER_TEMP/vitest-$(basename "$ws").json"
+            npm run test --workspace "$ws" -- --reporter=json --outputFile="$report" > /dev/null || true
+            node scripts/ci/assertNoSkippedTests.mjs "$report" "$ws" || status=1
           done
+          exit $status
