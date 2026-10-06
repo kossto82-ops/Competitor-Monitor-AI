@@ -28,3 +28,5 @@ export {
   createDigestInterpretationWorker,
   type DigestInterpretationJobPayload,
 } from "./digestInterpretationQueue.js";
+
+export { addJobReplacingTerminal } from "./enqueueJob.js";

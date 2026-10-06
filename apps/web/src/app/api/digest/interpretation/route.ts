@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDigestAiInterpretationForOrg, getOrCreateDigestAiInterpretationSlot, markDigestAiInterpretationFailed } from "@cma/db";
-import { createDigestInterpretationQueue, type DigestInterpretationJobPayload } from "@cma/queue";
+import { addJobReplacingTerminal, createDigestInterpretationQueue, type DigestInterpretationJobPayload } from "@cma/queue";
 import { DIGEST_PROMPT_VERSION } from "@cma/ai";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
@@ -69,7 +69,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     const queue = createDigestInterpretationQueue();
     try {
       const payload: DigestInterpretationJobPayload = { organizationId: session.organizationId, days, digestAiInterpretationId: slot.id };
-      await queue.add("interpret", payload, { jobId: slot.id });
+      // The previous run's completed/failed job still holds this id in
+      // BullMQ; a plain queue.add would drop the Refresh silently.
+      await addJobReplacingTerminal(queue, "interpret", payload, slot.id);
       return NextResponse.json({ interpretation: slot }, { status: 202 });
     } catch (enqueueErr) {
       // Same lesson as the ChangeEvent analysis route (Phase 2.1

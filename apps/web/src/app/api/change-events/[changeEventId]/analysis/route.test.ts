@@ -20,6 +20,10 @@ vi.mock("@cma/db", async (importOriginal) => {
 });
 
 vi.mock("@cma/queue", () => ({
+  // Delegates to the mocked queue.add so these tests keep asserting the
+  // (name, payload, { jobId }) contract; the replace-terminal behavior
+  // itself is covered against real Redis in packages/queue.
+  addJobReplacingTerminal: (q: { add: (...a: unknown[]) => unknown }, name: string, data: unknown, jobId: string) => q.add(name, data, { jobId }),
   createAiAnalysisQueue: () => ({ add: mockQueueAdd, close: mockQueueClose }),
 }));
 

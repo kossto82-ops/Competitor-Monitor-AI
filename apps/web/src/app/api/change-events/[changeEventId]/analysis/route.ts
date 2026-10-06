@@ -6,7 +6,7 @@ import {
   markAiAnalysisFailed,
   NotFoundError,
 } from "@cma/db";
-import { createAiAnalysisQueue } from "@cma/queue";
+import { addJobReplacingTerminal, createAiAnalysisQueue } from "@cma/queue";
 import { isSupportedAiChangeType, PROMPT_VERSION } from "@cma/ai";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
@@ -72,10 +72,13 @@ export async function POST(_request: Request, { params }: RouteParams): Promise<
 
     const queue = createAiAnalysisQueue();
     try {
-      await queue.add(
+      // A FAILED analysis keeps its BullMQ job (30 days) under this same
+      // id, and a plain queue.add would silently drop the retry.
+      await addJobReplacingTerminal(
+        queue,
         "analyze",
         { organizationId: session.organizationId, changeEventId, aiAnalysisId: analysis.id },
-        { jobId: analysis.id },
+        analysis.id,
       );
       return NextResponse.json({ analysis }, { status: 202 });
     } catch (enqueueErr) {

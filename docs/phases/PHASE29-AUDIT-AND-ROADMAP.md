@@ -112,7 +112,7 @@ Cada parte: rama o commit propio, tests en verde, y pausa para revisión antes d
 
 | Parte | Contenido | Errores | Verificación |
 |---|---|---|---|
-| A1 | `jobId` único/por tramo en colas de IA; no dejar filas `PENDING` huérfanas | E1 | Test con Redis real: Refresh y reintento tras completado/fallido se ejecutan |
+| A1 ✅ | Hecho: `addJobReplacingTerminal` (`packages/queue/src/enqueueJob.ts`) elimina el job terminal previo (completed/failed) y mantiene el dedup exacto de jobs en curso; usado en las rutas de digest y análisis | E1 | Test con Redis real (4 casos, incl. reproducción del bug): Refresh y reintento se ejecutan; sin duplicados en curso |
 | A2 | Proveedor SMTP genérico, estados `NOT_CONFIGURED/SENT/FAILED`, email determinista sin sección de IA no solicitada | E2, E21 | Tests con fake SMTP; fallo de envío no tumba el informe |
 | A2b | SMTP por organización cifrado, email de prueba | E2, E17 (parcial) | Tests de cifrado, aislamiento por org, SSRF del host |
 | A3 | Rate limit y cuotas con los valores de arriba; signup sin filtrar emails; topes por org | E3 | Tests de API: 429, aislamiento entre orgs |
