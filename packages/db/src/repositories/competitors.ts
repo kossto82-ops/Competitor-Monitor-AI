@@ -126,3 +126,8 @@ export async function listCompetitorsWithSummaryForOrg(organizationId: string) {
     latestChangeEvent: latestChangeByCompetitor.get(c.id) ?? null,
   }));
 }
+
+/** Every competitor of the organization, active or not - deactivating must not free quota. */
+export async function countCompetitorsForOrg(organizationId: string): Promise<number> {
+  return prisma.competitor.count({ where: { organizationId } });
+}

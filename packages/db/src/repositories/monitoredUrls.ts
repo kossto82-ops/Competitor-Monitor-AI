@@ -196,3 +196,8 @@ export async function getMonitoredUrlDetailForOrg(organizationId: string, monito
   ]);
   return { ...url, latestJob, latestChangeEvent };
 }
+
+/** Every monitored URL of the organization, paused or not - pausing must not free quota. */
+export async function countMonitoredUrlsForOrg(organizationId: string): Promise<number> {
+  return prisma.monitoredUrl.count({ where: { organizationId } });
+}

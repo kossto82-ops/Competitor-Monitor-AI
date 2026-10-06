@@ -10,6 +10,8 @@ import { addJobReplacingTerminal, createAiAnalysisQueue } from "@cma/queue";
 import { isSupportedAiChangeType, PROMPT_VERSION } from "@cma/ai";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
+import { readLimits } from "@/lib/limits";
+import { checkLimit } from "@/lib/limitResponse";
 
 interface RouteParams {
   params: Promise<{ changeEventId: string }>;
@@ -63,6 +65,10 @@ export async function POST(_request: Request, { params }: RouteParams): Promise<
         { status: 422 },
       );
     }
+
+    // Checked BEFORE the PENDING row is created: a refused request must not leave an orphan row behind.
+    const limited = await checkLimit(`ai-analysis:${session.organizationId}`, readLimits().aiAnalysesPerDay, 86_400, "Daily AI analysis limit reached for your organization. It resets within 24 hours.");
+    if (limited) return limited;
 
     const analysis = await getOrCreatePendingAiAnalysis(session.organizationId, changeEventId, PROMPT_VERSION);
 

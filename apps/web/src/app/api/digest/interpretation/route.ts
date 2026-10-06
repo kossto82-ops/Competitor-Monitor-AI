@@ -4,6 +4,8 @@ import { addJobReplacingTerminal, createDigestInterpretationQueue, type DigestIn
 import { DIGEST_PROMPT_VERSION } from "@cma/ai";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
+import { readLimits } from "@/lib/limits";
+import { checkLimit } from "@/lib/limitResponse";
 
 /** Same period selector convention as /digest, /dashboard, /compare - see intelligence.ts's getDigestForOrganization. */
 const VALID_PERIOD_DAYS = [7, 30, 90] as const;
@@ -55,6 +57,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (days === null) {
       return NextResponse.json({ error: "days must be one of 7, 30, 90" }, { status: 400 });
     }
+
+    // Checked BEFORE the slot is reset to PENDING: a refused request must not leave a job-less PENDING row.
+    const limited = await checkLimit(`ai-digest:${session.organizationId}`, readLimits().aiDigestsPerDay, 86_400, "Daily AI digest limit reached for your organization. It resets within 24 hours.");
+    if (limited) return limited;
 
     const slot = await getOrCreateDigestAiInterpretationSlot(session.organizationId, days, DIGEST_PROMPT_VERSION);
 

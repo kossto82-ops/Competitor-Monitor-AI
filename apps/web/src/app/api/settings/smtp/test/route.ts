@@ -3,6 +3,8 @@ import { getEnabledSmtpConfigForOrg, getReportRecipientEmailForOrg } from "@cma/
 import { classifyEmailSendError, createTenantSmtpProvider } from "@cma/notifications";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
+import { readLimits } from "@/lib/limits";
+import { checkLimit } from "@/lib/limitResponse";
 
 /**
  * Sends one test message through the organization's SAVED, enabled SMTP
@@ -15,6 +17,8 @@ import { toErrorResponse } from "@/lib/apiError";
 export async function POST(): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    const limited = await checkLimit(`smtp-test:${session.organizationId}`, readLimits().smtpTestPerHour, 3600, "Too many test emails. Please try again later.");
+    if (limited) return limited;
     const config = await getEnabledSmtpConfigForOrg(session.organizationId);
     if (!config) {
       return NextResponse.json(

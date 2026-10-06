@@ -4,9 +4,15 @@ import { createOrganizationWithOwner, findUserByEmail } from "@cma/db";
 import { hashPassword } from "@/lib/password";
 import { createSessionToken, SESSION_COOKIE_NAME, SESSION_DURATION_SECONDS } from "@/lib/session";
 import { toErrorResponse } from "@/lib/apiError";
+import { readLimits } from "@/lib/limits";
+import { checkLimit, clientIp } from "@/lib/limitResponse";
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
+    // Counted per attempt (not only successes), so it also throttles probing for registered emails.
+    const limited = await checkLimit(`signup:${clientIp(request)}`, readLimits().signupPerHour, 3600, "Too many sign-up attempts from this address. Please try again later.");
+    if (limited) return limited;
+
     const body = signupInputSchema.parse(await request.json());
 
     const existing = await findUserByEmail(body.email);

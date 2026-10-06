@@ -16,5 +16,6 @@ export default defineConfig({
     // with "Playwright Test did not expect test.describe() to be called
     // here", masking whatever real unit test results follow.
     exclude: ["e2e/**", "node_modules/**"],
+    setupFiles: ["./src/test/setup.ts"],
   },
 });

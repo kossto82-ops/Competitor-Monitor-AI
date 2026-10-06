@@ -3,6 +3,8 @@ import { createAiConnectionInputSchema } from "@cma/core";
 import { testAiConnection } from "@cma/ai";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
+import { readLimits } from "@/lib/limits";
+import { checkLimit } from "@/lib/limitResponse";
 
 /**
  * Phase 5 (Section 9): tests NOT-YET-SAVED credentials, exactly what the
@@ -13,7 +15,9 @@ import { toErrorResponse } from "@/lib/apiError";
  */
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    await requireSession(); // any authenticated member may test a configuration before saving it
+    const session = await requireSession(); // any authenticated member may test a configuration before saving it
+    const limited = await checkLimit(`ai-test:${session.organizationId}`, readLimits().aiTestPerHour, 3600, "Too many connection tests. Please try again later.");
+    if (limited) return limited;
     const body = createAiConnectionInputSchema.parse(await request.json());
     const result = await testAiConnection({
       provider: body.provider,

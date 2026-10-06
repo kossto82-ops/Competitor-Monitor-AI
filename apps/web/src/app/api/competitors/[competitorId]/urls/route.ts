@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { monitoredUrlInputSchema } from "@cma/core";
-import { createMonitoredUrl, listMonitoredUrlsForOrg } from "@cma/db";
+import { countMonitoredUrlsForOrg, createMonitoredUrl, listMonitoredUrlsForOrg } from "@cma/db";
 import { resolveAndValidateHost, SsrfBlockedError } from "@cma/security";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
+import { readLimits } from "@/lib/limits";
+import { quotaExceeded } from "@/lib/limitResponse";
 
 interface RouteParams {
   params: Promise<{ competitorId: string }>;
@@ -25,6 +27,11 @@ export async function POST(request: Request, { params }: RouteParams): Promise<N
     const session = await requireSession();
     const { competitorId } = await params;
     const body = monitoredUrlInputSchema.parse(await request.json());
+
+    const { urlsPerOrg } = readLimits();
+    if ((await countMonitoredUrlsForOrg(session.organizationId)) >= urlsPerOrg) {
+      return quotaExceeded(`Your organization has reached its limit of ${urlsPerOrg} monitored URLs.`);
+    }
 
     // Eager, best-effort SSRF check at creation time for fast user
     // feedback ("that's localhost, rejected") - this is NOT the

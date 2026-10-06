@@ -3,6 +3,8 @@ import { getMonitoredUrlForOrg, createPendingMonitoringJob, markMonitoringJobFai
 import { createMonitoringQueue } from "@cma/queue";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
+import { readLimits } from "@/lib/limits";
+import { checkLimit } from "@/lib/limitResponse";
 
 interface RouteParams {
   params: Promise<{ urlId: string }>;
@@ -47,6 +49,10 @@ export async function POST(_request: Request, { params }: RouteParams): Promise<
     const session = await requireSession();
     const { urlId } = await params;
     const monitoredUrl = await getMonitoredUrlForOrg(session.organizationId, urlId);
+
+    // Manual scans cost a real outbound request each; scheduled scans are not affected.
+    const limited = await checkLimit(`scan:${session.organizationId}`, readLimits().manualScansPerHour, 3600, "Manual scan limit reached for this hour. Scheduled scans keep running automatically.");
+    if (limited) return limited;
 
     const pendingJob = await createPendingMonitoringJob(monitoredUrl.organizationId, monitoredUrl.id);
 

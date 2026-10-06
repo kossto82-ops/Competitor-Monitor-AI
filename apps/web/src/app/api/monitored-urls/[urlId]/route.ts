@@ -3,6 +3,7 @@ import { updateMonitoredUrlInputSchema } from "@cma/core";
 import { deleteMonitoredUrlIfSafe, getMonitoredUrlDetailForOrg, updateMonitoredUrl } from "@cma/db";
 import { requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
+import { readLimits } from "@/lib/limits";
 
 interface RouteParams {
   params: Promise<{ urlId: string }>;
@@ -25,6 +26,14 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
     const session = await requireSession();
     const { urlId } = await params;
     const body = updateMonitoredUrlInputSchema.parse(await request.json());
+
+    const { minScanIntervalMinutes } = readLimits();
+    if (body.scanFrequencyMinutes !== undefined && body.scanFrequencyMinutes < minScanIntervalMinutes) {
+      return NextResponse.json(
+        { error: `Scans cannot run more often than every ${minScanIntervalMinutes} minutes.`, code: "SCAN_INTERVAL_TOO_SHORT" },
+        { status: 400 },
+      );
+    }
     const monitoredUrl = await updateMonitoredUrl(session.organizationId, urlId, body);
     return NextResponse.json({ monitoredUrl });
   } catch (err) {
