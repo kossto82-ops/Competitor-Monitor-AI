@@ -1,6 +1,26 @@
 import { z } from "zod";
 
 /**
+ * A URL that may only ever be http(s). `z.string().url()` alone accepts any scheme that parses
+ * (`javascript:`, `data:`, `ftp:`, `file:`), and some of these values are rendered back as links
+ * or used as an outbound request target, so the scheme is restricted at the input boundary.
+ */
+export const httpUrlSchema = z
+  .string()
+  .url()
+  .refine(
+    (value) => {
+      try {
+        const protocol = new URL(value).protocol;
+        return protocol === "http:" || protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    { message: "URL must use http or https" },
+  );
+
+/**
  * Format-level validation only. This does NOT establish that a URL is
  * safe to fetch (private IPs, localhost, etc.) - that is the job of
  * packages/security, which runs at fetch time (including on every
@@ -21,7 +41,7 @@ export type MonitoredUrlInput = z.infer<typeof monitoredUrlInputSchema>;
 
 export const competitorInputSchema = z.object({
   name: z.string().min(1).max(200),
-  website: z.string().url().optional(),
+  website: httpUrlSchema.optional(),
   notes: z.string().max(2000).optional(),
 });
 export type CompetitorInput = z.infer<typeof competitorInputSchema>;
@@ -29,7 +49,7 @@ export type CompetitorInput = z.infer<typeof competitorInputSchema>;
 /** Phase 5 (Section 3): editing an existing competitor. `isActive` is how deactivate/reactivate is expressed - never a destructive delete of history. */
 export const updateCompetitorInputSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  website: z.string().url().optional().nullable(),
+  website: httpUrlSchema.optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
   isActive: z.boolean().optional(),
 });
@@ -79,7 +99,7 @@ export const createAiConnectionInputSchema = z
   .object({
     provider: z.enum(SELECTABLE_AI_CONNECTION_PROVIDERS),
     model: z.string().min(1).max(200),
-    baseUrl: z.string().url().optional(),
+    baseUrl: httpUrlSchema.optional(),
     apiKey: z.string().min(1).max(2000),
     enabled: z.boolean().optional(),
   })
@@ -93,7 +113,7 @@ export type CreateAiConnectionInput = z.infer<typeof createAiConnectionInputSche
 export const updateAiConnectionInputSchema = z.object({
   provider: z.enum(SELECTABLE_AI_CONNECTION_PROVIDERS).optional(),
   model: z.string().min(1).max(200).optional(),
-  baseUrl: z.string().url().optional().nullable(),
+  baseUrl: httpUrlSchema.optional().nullable(),
   apiKey: z.string().min(1).max(2000).optional(),
   enabled: z.boolean().optional(),
 });

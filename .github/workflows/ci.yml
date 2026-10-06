@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # Real Postgres and Redis: packages/db and packages/queue (and the rate limiter in apps/web)
+    # have suites that SKIP THEMSELVES when the service is unreachable. A skip is not a pass, so
+    # the "no skipped tests" step below fails the job if that ever happens here.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cma
+          POSTGRES_PASSWORD: ci-only-postgres-password
+          POSTGRES_DB: competitor_monitor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cma -d competitor_monitor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    # None of these are secrets: they exist only inside this throwaway job, and are long and
+    # varied enough to pass the app's own refuse-to-start secret validation.
+    # Deliberately NOT set: CMA_ALLOW_PRIVATE_TARGETS, OPENAI_API_KEY, CMA_AI_PROVIDER - some
+    # tests assert the behaviour of an environment without them.
+    env:
+      DATABASE_URL: postgresql://cma:ci-only-postgres-password@127.0.0.1:5432/competitor_monitor?schema=public
+      REDIS_URL: redis://127.0.0.1:6379
+      AUTH_SECRET: 3f9a1c7e5b2d48a6c0e1f7b3d9a24c68e5f01a2b3c4d5e6f708192a3b4c5d6e7
+      CMA_AI_ENCRYPTION_KEY: 8c2b4e6a0d1f3957b8a6c4e2d0f1a3b5c7d9e1f30a2b4c6d8e0f1a3b5c7d9e1f
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Dependency order matters: apps and several packages import the compiled dist/ of the
+      # packages below them. db's build also runs `prisma generate`.
+      - name: Build packages
+        run: |
+          for pkg in core security extraction detection db queue ai notifications; do
+            npm run build --workspace packages/$pkg
+          done
+
+      - name: Apply database migrations
+        run: npm exec --workspace packages/db -- prisma migrate deploy
+
+      - name: Build apps
+        run: |
+          npm run build --workspace apps/worker
+          npm run build --workspace apps/web
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Re-run the infrastructure-backed workspaces with a machine-readable report and fail if
+      # anything was skipped (a skipped suite means the database/Redis was not actually used).
+      - name: Verify infrastructure-backed tests were not skipped
+        run: |
+          for ws in packages/db packages/queue apps/web; do
+            npm run test --workspace "$ws" -- --reporter=json --outputFile="$RUNNER_TEMP/vitest-$(basename "$ws").json"
+            node -e '
+              const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              const skipped = r.numPendingTests + r.numTodoTests;
+              console.log(process.argv[2] + ": " + r.numPassedTests + " passed, " + skipped + " skipped");
+              if (r.numFailedTests > 0 || skipped > 0) process.exit(1);
+            ' "$RUNNER_TEMP/vitest-$(basename "$ws").json" "$ws"
+          done

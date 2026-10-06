@@ -5,9 +5,13 @@ that accumulated history into explainable competitive intelligence: deterministi
 detection first, historical pattern analysis second, AI interpretation only on top of both -
 never a guess standing in for evidence.
 
-**Status:** Phase 10 complete - deterministic monitoring, historical intelligence, and a
-per-organization Digest are implemented and validated end-to-end against real Postgres/Redis and
-a real browser (Playwright). See [docs/phases/](docs/phases/) for the full history of what was
+**Status:** Phase 29 in progress. Phases 1-28 delivered deterministic monitoring (including
+JSON-LD and bounded HTML promotion extraction), historical intelligence, a per-organization Digest,
+optional evidence-grounded AI interpretation, and an in-process scheduler. Phase 29 starts with a
+technical and product audit ([PHASE29-AUDIT-AND-ROADMAP.md](docs/phases/PHASE29-AUDIT-AND-ROADMAP.md))
+and its Phase A reliability/security fixes; the audit also lists what is still missing for this to
+become a competitive-intelligence platform (price extraction without JSON-LD, signals, market-level
+patterns, an executive dashboard). See [docs/phases/](docs/phases/) for the full history of what was
 built, tested, and deliberately deferred at each phase, and [DevRunbook.md](DevRunbook.md) for
 day-to-day dev setup (build/run/test commands, ports, environment variables).
 
@@ -21,7 +25,15 @@ day-to-day dev setup (build/run/test commands, ports, environment variables).
 - **Optional AI interpretation** of a single detected change, using a customer's own AI provider
   connection (bring-your-own-key, encrypted at rest) - never required, never a substitute for the
   underlying deterministic evidence.
-- **Daily competitive intelligence report**, generated per organization and delivered by email.
+- **Promotions**: JSON-LD offers (discount, code, validity) and bounded visible-HTML "X% off" /
+  free-trial / coupon signals, attributed to a plan only when the page makes the association clear.
+- **Daily competitive intelligence report**, generated per organization and delivered by email over
+  any SMTP account - the operator's default (`CMA_EMAIL_*`) or an account each organization
+  configures itself under Settings -> Notifications. With no SMTP configured nothing is sent and
+  nothing is recorded as sent; the report is still available in the app. The email is deterministic;
+  AI interpretation appears only if a user requested it.
+- **Abuse and cost limits**: failed-login throttling, per-organization quotas on manual scans and
+  AI calls, and caps on competitors and monitored URLs - all configurable (`CMA_LIMIT_*`).
 - **Historical intelligence**: per-competitor activity metrics, price history, product lifecycle
   (added/removed), and two deterministic patterns - activity vs. a competitor's own historical
   baseline, and repeated price-change detection per product/plan - both gated by a documented
@@ -73,13 +85,16 @@ docs/
 - A PostgreSQL instance reachable via `DATABASE_URL`
 - A Redis instance reachable via `REDIS_URL`
 
-If you have Docker available:
+If you have Docker available, set `POSTGRES_PASSWORD` and `REDIS_PASSWORD` in `.env` first
+(the compose file has no default credentials and refuses to start without them), then:
 
 ```bash
 docker compose up -d
 ```
 
-This starts Postgres on `5432` and Redis on `6379` matching `.env.example`.
+This starts Postgres on `127.0.0.1:5432` and Redis on `127.0.0.1:6379` - bound to localhost only,
+never to all interfaces. Use the same passwords in `DATABASE_URL` / `REDIS_URL` (see
+`.env.example`).
 
 If Docker isn't available on your machine, install PostgreSQL and Redis natively instead (both run
 fine as plain user processes, no admin rights or service registration required) - see
@@ -96,7 +111,10 @@ cp .env.example .env
 #   openssl rand -hex 32
 ```
 
-Fill in `AUTH_SECRET` and `CMA_AI_ENCRYPTION_KEY`. `.env` is read by `packages/db` (Prisma CLI) and
+Fill in `AUTH_SECRET` and `CMA_AI_ENCRYPTION_KEY` with two **different** random values. The web app
+and the worker refuse to start if either is still a placeholder, shorter than 32 characters or too
+repetitive (and, with `NODE_ENV=production`, if the database password is a well-known default).
+`.env` is read by `packages/db` (Prisma CLI) and
 by `apps/web`/`apps/worker` at runtime. Next.js and the worker's `tsx`-based scripts load `.env`
 automatically; if you run compiled `dist/` output directly, export the variables into the shell
 first. See `.env.example` for what each variable is for, including the AI provider setup and the
@@ -117,16 +135,23 @@ changes without a new migration).
 Three processes, each in its own terminal:
 
 ```bash
-npm run --workspace apps/web dev      # Next.js app + API, http://localhost:3000
-npm run --workspace apps/worker dev   # BullMQ worker (monitoring, AI analysis, daily reports)
+npm run --workspace apps/web dev        # Next.js app + API, http://localhost:3000
+npm run --workspace apps/worker dev     # BullMQ worker (monitoring, AI analysis, daily reports)
+npm run worker:scheduler                # fixed-interval scheduler: enqueues due URLs every 15 min and daily reports hourly
 ```
 
-There is no scheduler yet for monitoring jobs - they only run when enqueued:
+The scheduler (`apps/worker/src/scheduler.ts`) is a deliberately small in-process loop for
+environments without an external cron; production can instead call the one-shot commands from an OS
+cron entry or a Kubernetes CronJob:
 
 ```bash
-npm run worker:enqueue                # enqueue every active MonitoredUrl
+npm run worker:enqueue                # enqueue every URL that is due
 npm run worker:enqueue-reports        # enqueue daily report generation for eligible organizations
 ```
+
+A URL that keeps failing is retried with exponential backoff (15 min doubling up to 24 h) instead of
+on every tick - see [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md). The scheduler
+never calls an AI provider; AI runs only when a user asks for it.
 
 Sign up at `http://localhost:3000/signup`, add a competitor and one of its pages, then trigger a
 scan from the competitor's detail page (or `POST /api/monitored-urls/{urlId}/scan`).
@@ -154,7 +179,7 @@ Redis, worker, and a local fixture "competitor site" server (`scripts/validation
 ## What's deliberately not built (by design, not oversight)
 
 No ranking/score/"winner" between competitors, no cross-competitor product/plan identity matching,
-no importance-weighted digest ordering, no forecasting, no billing/team-permissions, no promotion
-extraction (no extractor currently emits promotion data). Each of these is a documented, explicit
-non-goal in the relevant phase report under [docs/phases/](docs/phases/) - not a gap that was
-missed.
+no importance-weighted digest ordering, no forecasting, no billing/team-permissions, no headless
+browser (JavaScript-rendered pages are detected and flagged, not rendered). Each of these is a
+documented, explicit non-goal in the relevant phase report under [docs/phases/](docs/phases/) - not
+a gap that was missed. The Phase 29 audit re-examines which of them should stay non-goals.
