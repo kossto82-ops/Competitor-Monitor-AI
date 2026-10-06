@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { SsrfBlockedError, resolveAndValidateHost, type ResolveFn } from "@cma/security";
 
 /**
  * Email delivery is a swappable detail: callers depend on this
@@ -89,6 +90,11 @@ function parseSecurity(raw: string | undefined, port: number): SmtpSecurity | nu
     default:
       return null;
   }
+}
+
+export function formatFromHeader(address: string, displayName?: string | null): string {
+  const name = displayName?.trim().replace(/["\r\n<>]/g, "");
+  return name ? `"${name}" <${address}>` : address;
 }
 
 /**
@@ -193,4 +199,95 @@ export function createEmailProviderFromEnv(env: Record<string, string | undefine
   const parsed = parseSmtpConfig(env);
   if (parsed.ok) return new SmtpEmailProvider(parsed.config);
   return new NotConfiguredEmailProvider(parsed.reason);
+}
+
+/** An organization's own SMTP account (customer-supplied, therefore untrusted input). */
+export interface TenantSmtpConfig {
+  host: string;
+  port: number;
+  security: "ssl" | "starttls";
+  username?: string | null;
+  password?: string | null;
+  fromAddress: string;
+  fromName?: string | null;
+}
+
+/**
+ * A transport for a customer-supplied SMTP host. The operator's own SMTP
+ * settings (env) are trusted; this host is not - the customer could
+ * point it at localhost, the cloud metadata service or an internal
+ * mail relay and use delivery as a port scanner. So, exactly like page
+ * fetching (see @cma/security), every send first resolves the host,
+ * validates EVERY returned address against the SSRF allowlist, and then
+ * connects to that validated IP (never re-resolving the name, which
+ * would reopen the DNS-rebinding window). TLS certificate validation
+ * stays on, checked against the original hostname via `servername`.
+ */
+export function createGuardedSmtpTransport(config: TenantSmtpConfig, resolveFn?: ResolveFn): SmtpTransport {
+  return {
+    async sendMail(options) {
+      const pinnedAddress = await resolveAndValidateHost(config.host, resolveFn);
+      const transporter = nodemailer.createTransport({
+        host: pinnedAddress,
+        port: config.port,
+        secure: config.security === "ssl",
+        requireTLS: config.security === "starttls",
+        tls: { servername: config.host },
+        ...(config.username ? { auth: { user: config.username, pass: config.password ?? "" } } : {}),
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 20_000,
+      });
+      try {
+        return await transporter.sendMail(options);
+      } finally {
+        transporter.close();
+      }
+    },
+  };
+}
+
+export function createTenantSmtpProvider(config: TenantSmtpConfig, resolveFn?: ResolveFn): EmailProvider {
+  return new SmtpEmailProvider(
+    {
+      host: config.host,
+      port: config.port,
+      security: config.security,
+      ...(config.username ? { user: config.username, pass: config.password ?? "" } : {}),
+      from: formatFromHeader(config.fromAddress, config.fromName),
+    },
+    createGuardedSmtpTransport(config, resolveFn),
+  );
+}
+
+export interface EmailSendFailure {
+  code: "BLOCKED_HOST" | "AUTH_FAILED" | "CONNECTION_FAILED" | "TLS_FAILED" | "REJECTED" | "UNKNOWN";
+  /** Safe to show to the customer: never echoes the server's raw reply, banner or resolved address. */
+  message: string;
+}
+
+/**
+ * Turns a failed send into a short, customer-safe explanation. A
+ * customer-supplied host must not become an oracle for what is inside
+ * our network, so the raw SMTP reply and any resolved address are never
+ * returned - only a classification.
+ */
+export function classifyEmailSendError(err: unknown): EmailSendFailure {
+  if (err instanceof SsrfBlockedError) {
+    return { code: "BLOCKED_HOST", message: "This host resolves to a private or internal address, which is not allowed." };
+  }
+  const code = typeof err === "object" && err !== null && "code" in err ? String((err as { code: unknown }).code) : "";
+  const text = err instanceof Error ? err.message : "";
+
+  if (code === "EAUTH") return { code: "AUTH_FAILED", message: "The server rejected the username or password." };
+  if (/certificate|self[- ]signed|hostname\/ip does not match|altnames|wrong version number|ssl|tls/i.test(text) || code.startsWith("ERR_TLS") || code === "ETLS") {
+    return { code: "TLS_FAILED", message: "The secure connection could not be established. Check the port and the SSL/STARTTLS setting, and that the server certificate is valid for this host." };
+  }
+  if (["ECONNECTION", "ETIMEDOUT", "ESOCKET", "ECONNREFUSED", "ENOTFOUND", "EDNS", "ECONNRESET", "EHOSTUNREACH"].includes(code) || /timed? ?out|ENOTFOUND|ECONNREFUSED/i.test(text)) {
+    return { code: "CONNECTION_FAILED", message: "Could not connect to the SMTP server. Check the host and port." };
+  }
+  if (code === "EENVELOPE" || code === "EMESSAGE") {
+    return { code: "REJECTED", message: "The server rejected the message (sender or recipient not accepted)." };
+  }
+  return { code: "UNKNOWN", message: "The email could not be sent." };
 }

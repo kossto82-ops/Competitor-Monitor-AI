@@ -98,3 +98,46 @@ export const updateAiConnectionInputSchema = z.object({
   enabled: z.boolean().optional(),
 });
 export type UpdateAiConnectionInput = z.infer<typeof updateAiConnectionInputSchema>;
+
+/**
+ * Phase 29 / A2b: an organization's own outgoing-email (SMTP) account.
+ *
+ * The host is customer-supplied, so the server will connect to an address
+ * the customer chose. Two limits keep that from becoming a port scanner:
+ * only the standard submission ports are accepted (the host itself is
+ * SSRF-validated again, at connect time, in @cma/notifications), and only
+ * encrypted transports exist - there is deliberately no "none" option, so
+ * a password is never sent in clear text.
+ */
+export const SMTP_ALLOWED_PORTS = [25, 465, 587, 2525] as const;
+export const SMTP_SECURITY_MODES = ["ssl", "starttls"] as const;
+
+const smtpHostSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(253)
+  .regex(/^[A-Za-z0-9.-]+$|^\[?[0-9A-Fa-f:.]+\]?$/, "host must be a hostname or IP address (no scheme or path)");
+
+const smtpFromNameSchema = z
+  .string()
+  .trim()
+  .max(100)
+  .refine((v) => !/["\r\n<>]/.test(v), "name cannot contain quotes, angle brackets or line breaks");
+
+export const upsertSmtpConnectionInputSchema = z
+  .object({
+    host: smtpHostSchema,
+    port: z.number().int().refine((p): p is (typeof SMTP_ALLOWED_PORTS)[number] => (SMTP_ALLOWED_PORTS as readonly number[]).includes(p), {
+      message: `port must be one of ${SMTP_ALLOWED_PORTS.join(", ")}`,
+    }),
+    security: z.enum(SMTP_SECURITY_MODES),
+    username: z.string().trim().min(1).max(320).optional().nullable(),
+    /** Omit to keep the stored password; send null to remove it; a string replaces it. */
+    password: z.string().min(1).max(1000).optional().nullable(),
+    fromAddress: z.string().trim().email().max(320),
+    fromName: smtpFromNameSchema.optional().nullable(),
+    enabled: z.boolean().optional(),
+  })
+  .refine((v) => !(v.password && !v.username), { message: "username is required when a password is set", path: ["username"] });
+export type UpsertSmtpConnectionInput = z.infer<typeof upsertSmtpConnectionInputSchema>;

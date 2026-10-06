@@ -1,7 +1,7 @@
 import { resolveOrgLocalDayWindow } from "@cma/core";
 import * as db from "@cma/db";
 import type { DailyReportJobPayload } from "@cma/queue";
-import { buildDailyReportEmail, createEmailProviderFromEnv, isEmailProviderConfigured, type EmailProvider, type ReportEmailChangeInput } from "@cma/notifications";
+import { buildDailyReportEmail, createEmailProviderFromEnv, createTenantSmtpProvider, isEmailProviderConfigured, type EmailProvider, type ReportEmailChangeInput } from "@cma/notifications";
 
 interface ChangeEventForEmailLike {
   id: string;
@@ -67,7 +67,11 @@ export interface ReportPipelineDeps {
   markReportEmailSent: typeof db.markReportEmailSent;
   markReportEmailFailed: typeof db.markReportEmailFailed;
   getOrganizationById: typeof db.getOrganizationById;
+  /** The operator's default delivery (env). Used when the organization has no SMTP connection of its own. */
   emailProvider: EmailProvider;
+  /** The organization's own SMTP account, if it configured and enabled one (A2b). */
+  getEnabledSmtpConfigForOrg: typeof db.getEnabledSmtpConfigForOrg;
+  createTenantEmailProvider: (config: db.DecryptedSmtpConfig) => EmailProvider;
   /** Base URL for the authenticated web app - used to build the "View full report" link (Section 15). */
   webAppBaseUrl: string;
 }
@@ -86,6 +90,17 @@ export function createDefaultReportPipelineDeps(): ReportPipelineDeps {
     markReportEmailFailed: db.markReportEmailFailed,
     getOrganizationById: db.getOrganizationById,
     emailProvider: createEmailProviderFromEnv(),
+    getEnabledSmtpConfigForOrg: db.getEnabledSmtpConfigForOrg,
+    createTenantEmailProvider: (config) =>
+      createTenantSmtpProvider({
+        host: config.host,
+        port: config.port,
+        security: config.security,
+        username: config.username,
+        password: config.password,
+        fromAddress: config.fromAddress,
+        fromName: config.fromName,
+      }),
     webAppBaseUrl: process.env["WEB_APP_BASE_URL"] ?? "http://localhost:3000",
   };
 }
@@ -155,7 +170,10 @@ async function attemptReportEmailDelivery(
   // No delivery channel configured: nothing can leave the machine, so no
   // NotificationLog row is written and the report is never recorded as SENT.
   // The report itself stays fully available in the web app.
-  if (!isEmailProviderConfigured(deps.emailProvider)) return "SKIPPED_NOT_CONFIGURED";
+  // An organization's own SMTP account wins over the operator's default.
+  const orgSmtp = await deps.getEnabledSmtpConfigForOrg(organizationId);
+  const emailProvider = orgSmtp ? deps.createTenantEmailProvider(orgSmtp) : deps.emailProvider;
+  if (!isEmailProviderConfigured(emailProvider)) return "SKIPPED_NOT_CONFIGURED";
 
   const recipient = await deps.getReportRecipientEmailForOrg(organizationId);
   if (!recipient) return "SKIPPED_NO_RECIPIENT";
@@ -177,7 +195,7 @@ async function attemptReportEmailDelivery(
       recipientEmail: recipient,
     });
 
-    await deps.emailProvider.send(email);
+    await emailProvider.send(email);
     await deps.markReportEmailSent(reservation.log.id);
     return "SENT";
   } catch (err) {

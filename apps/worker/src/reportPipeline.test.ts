@@ -58,6 +58,8 @@ function makeDeps(overrides: Partial<ReportPipelineDeps> = {}): ReportPipelineDe
     markReportEmailFailed: vi.fn().mockResolvedValue(undefined),
     getOrganizationById: vi.fn().mockResolvedValue({ id: "org-1", name: "Acme Inc" }),
     emailProvider: new FakeEmailProvider(),
+    getEnabledSmtpConfigForOrg: vi.fn().mockResolvedValue(null),
+    createTenantEmailProvider: vi.fn(),
     webAppBaseUrl: "https://app.example.test",
     ...overrides,
   };
@@ -206,6 +208,42 @@ describe("generateDailyReportJob", () => {
     expect(deps.getReportRecipientEmailForOrg).not.toHaveBeenCalled();
     expect(deps.reserveReportEmailNotification).not.toHaveBeenCalled();
     expect(deps.markReportEmailSent).not.toHaveBeenCalled();
+  });
+
+  it("an organization's own SMTP account is used instead of the operator default, and works even when the default is not configured", async () => {
+    const orgProvider = new FakeEmailProvider();
+    const smtp = { host: "smtp.customer.test", port: 587, security: "starttls" as const, username: "u", password: "pw", fromAddress: "a@customer.test", fromName: null };
+    const deps = makeDeps({
+      emailProvider: new NotConfiguredEmailProvider("no operator SMTP"),
+      getEnabledSmtpConfigForOrg: vi.fn().mockResolvedValue(smtp),
+      createTenantEmailProvider: vi.fn().mockReturnValue(orgProvider),
+    });
+
+    const result = await generateDailyReportJob(PAYLOAD, deps);
+
+    expect(result.emailOutcome).toBe("SENT");
+    expect(deps.getEnabledSmtpConfigForOrg).toHaveBeenCalledWith(PAYLOAD.organizationId);
+    expect(deps.createTenantEmailProvider).toHaveBeenCalledWith(smtp);
+    expect(orgProvider.sent).toHaveLength(1);
+  });
+
+  it("without an organization SMTP account the operator default is used", async () => {
+    const deps = makeDeps();
+    const result = await generateDailyReportJob(PAYLOAD, deps);
+    expect(result.emailOutcome).toBe("SENT");
+    expect(deps.createTenantEmailProvider).not.toHaveBeenCalled();
+    expect((deps.emailProvider as FakeEmailProvider).sent).toHaveLength(1);
+  });
+
+  it("a failing organization SMTP account is recorded as FAILED and never silently falls back to the operator default", async () => {
+    const deps = makeDeps({
+      getEnabledSmtpConfigForOrg: vi.fn().mockResolvedValue({ host: "h", port: 587, security: "starttls", username: null, password: null, fromAddress: "a@b.test", fromName: null }),
+      createTenantEmailProvider: vi.fn().mockReturnValue(new FakeEmailProvider(true)),
+    });
+    const result = await generateDailyReportJob(PAYLOAD, deps);
+
+    expect(result.emailOutcome).toBe("FAILED");
+    expect((deps.emailProvider as FakeEmailProvider).sent).toHaveLength(0);
   });
 
   it("Section 17: an email send failure is isolated - the report stays COMPLETED, the job does not throw, and the failure is recorded", async () => {

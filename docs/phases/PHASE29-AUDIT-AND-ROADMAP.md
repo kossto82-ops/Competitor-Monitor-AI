@@ -90,6 +90,7 @@ Método: lectura del código real por área (datos/detección/extracción, IA/wo
 | Análisis de IA por cambio | 30 / día por org | `CMA_LIMIT_AI_ANALYSES_PER_DAY` |
 | Interpretaciones de digest | 10 / día por org | `CMA_LIMIT_AI_DIGESTS_PER_DAY` |
 | Test de conexión de IA | 10 / hora por org | `CMA_LIMIT_AI_TEST_PER_HOUR` |
+| Email de prueba SMTP (`/api/settings/smtp/test`) | 10 / hora por org | `CMA_LIMIT_SMTP_TEST_PER_HOUR` |
 | Competidores por org | 25 | `CMA_LIMIT_COMPETITORS_PER_ORG` |
 | URLs monitorizadas por org | 100 | `CMA_LIMIT_URLS_PER_ORG` |
 | Frecuencia mínima de escaneo | 60 min | `CMA_LIMIT_MIN_SCAN_INTERVAL_MIN` |
@@ -114,7 +115,7 @@ Cada parte: rama o commit propio, tests en verde, y pausa para revisión antes d
 |---|---|---|---|
 | A1 ✅ | Hecho: `addJobReplacingTerminal` (`packages/queue/src/enqueueJob.ts`) elimina el job terminal previo (completed/failed) y mantiene el dedup exacto de jobs en curso; usado en las rutas de digest y análisis | E1 | Test con Redis real (4 casos, incl. reproducción del bug): Refresh y reintento se ejecutan; sin duplicados en curso |
 | A2 ✅ | Hecho: SMTP genérico por variables de entorno (`CMA_EMAIL_*`, ver `.env.example`), `SKIPPED_NOT_CONFIGURED` sin proveedor (nunca `SENT`), email sin sección de IA no solicitada, reintento de entrega fallida por BullMQ. Proveedor SMTP, estados `NOT_CONFIGURED/SENT/FAILED`, email determinista sin sección de IA no solicitada | E2, E21 | Tests con fake SMTP; fallo de envío no tumba el informe |
-| A2b | SMTP por organización cifrado, email de prueba | E2, E17 (parcial) | Tests de cifrado, aislamiento por org, SSRF del host |
+| A2b ✅ | Hecho: tabla `organization_smtp_connections` (contraseña cifrada AES-256-GCM, solo escritura), API `/api/settings/smtp` (+`/test`), formulario en Settings → Notifications; el worker usa la cuenta de la org y, si no hay, la del operador. Host validado contra SSRF en cada envío (IP fijada, TLS verificado contra el hostname), solo puertos 25/465/587/2525 y solo transporte cifrado; el email de prueba solo va al destinatario de la propia org y los errores se clasifican sin revelar datos internos. SMTP por organización cifrado, email de prueba | E2, E17 (parcial) | Tests de cifrado, aislamiento por org, SSRF del host |
 | A3 | Rate limit y cuotas con los valores de arriba; signup sin filtrar emails; topes por org | E3 | Tests de API: 429, aislamiento entre orgs |
 | A4 | Compose en 127.0.0.1, contraseña de Redis, credenciales fuera de defaults, `dump.rdb` en `.gitignore`, validación de arranque de `AUTH_SECRET` y `CMA_AI_ENCRYPTION_KEY` | E4, E17 (arranque), E31 (`ALLOW_PRIVATE`) | Test de arranque con valores inválidos |
 | A5 | Neutralizar delimitadores, mover `entityKey/label` a zona no confiable, validador de afirmaciones en el análisis por cambio, no cortar etiquetas al truncar | E15 | Tests con páginas hostiles; el e2e de OpenAI sigue pasando |

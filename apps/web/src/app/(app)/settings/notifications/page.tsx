@@ -1,14 +1,17 @@
-import { getOrganizationById, getReportRecipientEmailForOrg } from "@cma/db";
+import { getOrganizationById, getReportRecipientEmailForOrg, getSmtpConnectionForOrg } from "@cma/db";
+import { createEmailProviderFromEnv, isEmailProviderConfigured } from "@cma/notifications";
 import { getSession } from "@/lib/currentSession";
 import { NotificationSettingsForm } from "@/components/app/NotificationSettingsForm";
+import { SmtpSettingsForm } from "@/components/app/SmtpSettingsForm";
 
 export default async function NotificationSettingsPage() {
   const session = await getSession();
   if (!session) return null;
 
-  const [organization, effectiveRecipient] = await Promise.all([
+  const [organization, effectiveRecipient, smtpConnection] = await Promise.all([
     getOrganizationById(session.organizationId),
     getReportRecipientEmailForOrg(session.organizationId),
+    getSmtpConnectionForOrg(session.organizationId),
   ]);
   if (!organization) return null;
 
@@ -30,6 +33,24 @@ export default async function NotificationSettingsPage() {
           ownerEmail,
           timezone: organization.timezone,
         }}
+      />
+
+      <SmtpSettingsForm
+        initial={
+          smtpConnection
+            ? {
+                host: smtpConnection.host,
+                port: smtpConnection.port,
+                security: smtpConnection.security,
+                username: smtpConnection.username,
+                hasPassword: smtpConnection.hasPassword,
+                fromAddress: smtpConnection.fromAddress,
+                fromName: smtpConnection.fromName,
+                enabled: smtpConnection.enabled,
+              }
+            : null
+        }
+        serverDefaultConfigured={isEmailProviderConfigured(createEmailProviderFromEnv())}
       />
     </div>
   );

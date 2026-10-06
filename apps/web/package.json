@@ -14,6 +14,7 @@
     "@cma/ai": "*",
     "@cma/core": "*",
     "@cma/db": "*",
+    "@cma/notifications": "*",
     "@cma/queue": "*",
     "@cma/security": "*",
     "bcryptjs": "^2.4.3",

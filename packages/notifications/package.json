@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@cma/core": "*",
-    "nodemailer": "^10.0.15"
+    "nodemailer": "^10.0.15",
+    "@cma/security": "*"
   },
   "devDependencies": {
     "@types/mailparser": "^3.9.0",

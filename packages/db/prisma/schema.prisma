@@ -162,6 +162,7 @@ model Organization {
   usageRecords  UsageRecord[]
   reports       Report[]
   aiConnections AiConnection[]
+  smtpConnection OrganizationSmtpConnection?
   digestAiInterpretations DigestAiInterpretation[]
 
   @@map("organizations")
@@ -414,6 +415,30 @@ model AiAnalysis {
 // from one provider to another) but at most one ENABLED one is ever
 // used by the pipeline at a time - see
 // getEnabledAiConnectionConfigForOrg in the repository.
+// Phase 29 / A2b: an organization's own outgoing-email (SMTP) account, so its
+// daily report is sent from the customer's own mailbox/company server instead
+// of the operator's default. One per organization. The password is encrypted
+// with the same AES-256-GCM helper as AiConnection.encryptedApiKey and never
+// leaves the server; the host is SSRF-validated at connect time (tenant input).
+model OrganizationSmtpConnection {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  host              String
+  port              Int
+  security          String // "ssl" | "starttls"
+  username          String?
+  encryptedPassword String?
+  fromAddress       String
+  fromName          String?
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("organization_smtp_connections")
+}
+
 model AiConnection {
   id             String       @id @default(cuid())
   organizationId String
