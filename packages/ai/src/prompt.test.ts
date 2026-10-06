@@ -58,13 +58,26 @@ describe("buildUserPrompt", () => {
     expect(untrustedBlock).toContain("Pro Plan 39.00 EUR");
   });
 
-  it("keeps deterministic facts (price/currency/source URL) OUTSIDE the untrusted block", () => {
+  it("keeps only what the application computed (change type, percentage, source URL) OUTSIDE the untrusted block", () => {
     const prompt = buildUserPrompt(baseInput());
-    const untrustedStart = prompt.indexOf("<UNTRUSTED_WEB_CONTENT>");
-    const trustedSection = prompt.slice(0, untrustedStart);
-    expect(trustedSection).toContain("49.00");
-    expect(trustedSection).toContain("39.00");
+    const trustedSection = prompt.slice(0, prompt.indexOf("<UNTRUSTED_WEB_CONTENT>"));
+    expect(trustedSection).toContain("Change type: PRICE_CHANGE");
+    expect(trustedSection).toContain("Percentage change: -20.41%");
     expect(trustedSection).toContain("https://competitor.test/pricing");
+  });
+
+  it("puts EVERY page-derived value (old/new price, currency, item labels) INSIDE the untrusted block", () => {
+    const prompt = buildUserPrompt(baseInput());
+    const trusted = prompt.slice(0, prompt.indexOf("<UNTRUSTED_WEB_CONTENT>"));
+    const untrusted = prompt.slice(prompt.indexOf("<UNTRUSTED_WEB_CONTENT>"), prompt.indexOf("</UNTRUSTED_WEB_CONTENT>"));
+    expect(trusted).not.toMatch(/49.00|39.00|EUR/);
+    expect(untrusted).toContain("Old price: 49.00");
+    expect(untrusted).toContain("New price: 39.00");
+    expect(untrusted).toContain("Currency: EUR");
+
+    const added = buildUserPrompt(baseInput({ changeType: "PRODUCT_ADDED", priceChange: null, productAdded: { label: "Gold Plan", value: "99" } }));
+    expect(added.slice(0, added.indexOf("<UNTRUSTED_WEB_CONTENT>"))).not.toContain("Gold Plan");
+    expect(added).toContain("Newly detected item: Gold Plan");
   });
 
   it("carries hostile evidence content verbatim inside the delimited block, never let it escape it (prompt-injection defense)", () => {

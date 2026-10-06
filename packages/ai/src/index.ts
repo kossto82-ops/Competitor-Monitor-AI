@@ -22,6 +22,8 @@ export * from "./prompt.js";
 export * from "./parseOutput.js";
 export * from "./analyzeChangeWithRetry.js";
 export * from "./analyzeAndValidateChange.js";
+export * from "./validateChangeClaimSafety.js";
+export * from "./untrusted.js";
 export * from "./registry.js";
 export * from "./testConnection.js";
 export * from "./providers/fakeProvider.js";

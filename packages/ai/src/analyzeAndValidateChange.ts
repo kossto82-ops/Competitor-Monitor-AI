@@ -1,5 +1,6 @@
 import { analyzeChangeWithRetry } from "./analyzeChangeWithRetry.js";
 import { parseAiOutput } from "./parseOutput.js";
+import { validateChangeClaimSafety } from "./validateChangeClaimSafety.js";
 import type { AiAnalysisOutput, AiProvider, ChangeAnalysisInput, NormalizedAiResponse } from "./types.js";
 
 export interface AnalyzedChange {
@@ -21,5 +22,8 @@ export interface AnalyzedChange {
 export async function analyzeAndValidateChange(provider: AiProvider, input: ChangeAnalysisInput): Promise<AnalyzedChange> {
   const raw = await analyzeChangeWithRetry(provider, input);
   const output = parseAiOutput(provider.name, raw.content);
+  // Second, independent line of defense after schema validation (see validateChangeClaimSafety.ts):
+  // a response that makes a claim the evidence cannot support is rejected whole, never edited.
+  validateChangeClaimSafety(provider.name, output, input, raw.content);
   return { output, raw };
 }
