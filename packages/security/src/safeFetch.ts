@@ -19,6 +19,12 @@ export interface SafeFetchOptions {
   maxRedirects?: number;
   maxBodyBytes?: number;
   userAgent?: string;
+  /**
+   * When set, a 2xx response whose Content-Type is present and does not match is rejected as soon
+   * as the headers arrive, before any of the body is downloaded (a PDF or video behind a pricing
+   * URL must not be buffered and parsed). A missing Content-Type is allowed.
+   */
+  allowedContentTypes?: RegExp;
   /** Test seam - defaults to a real DNS lookup. */
   resolveFn?: ResolveFn;
 }
@@ -64,6 +70,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
     maxRedirects = DEFAULT_MAX_REDIRECTS,
     maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
     userAgent = DEFAULT_USER_AGENT,
+    allowedContentTypes,
     resolveFn,
   } = options;
 
@@ -74,7 +81,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
     assertProtocolAllowed(currentUrl);
     const validatedIp = await resolveAndValidateHost(currentUrl.hostname, resolveFn);
 
-    const response = await requestViaIp(currentUrl, validatedIp, { timeoutMs, maxBodyBytes, userAgent });
+    const response = await requestViaIp(currentUrl, validatedIp, { timeoutMs, maxBodyBytes, userAgent, allowedContentTypes });
 
     if (isRedirectStatus(response.status) && response.headers.location) {
       if (redirectsLeft <= 0) {
@@ -103,7 +110,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
 export function requestViaIp(
   url: URL,
   connectIp: string,
-  opts: { timeoutMs: number; maxBodyBytes: number; userAgent: string },
+  opts: { timeoutMs: number; maxBodyBytes: number; userAgent: string; allowedContentTypes?: RegExp },
 ): Promise<Omit<SafeFetchResult, "finalUrl">> {
   const isHttps = url.protocol === "https:";
   const transport = isHttps ? https : http;
@@ -132,6 +139,23 @@ export function requestViaIp(
         const chunks: Buffer[] = [];
         let received = 0;
         let aborted = false;
+        const status = res.statusCode ?? 0;
+
+        // Refuse before downloading anything when the headers already say the body is unusable.
+        const contentType = String(res.headers["content-type"] ?? "");
+        if (opts.allowedContentTypes && status >= 200 && status < 300 && contentType && !opts.allowedContentTypes.test(contentType)) {
+          aborted = true;
+          res.destroy();
+          reject(new SafeFetchError(`Unsupported content type "${contentType.split(";")[0]?.trim()}" - only web pages can be monitored.`));
+          return;
+        }
+        const declaredLength = Number(res.headers["content-length"]);
+        if (Number.isFinite(declaredLength) && declaredLength > opts.maxBodyBytes) {
+          aborted = true;
+          res.destroy();
+          reject(new SafeFetchError(`Response for "${url.toString()}" exceeded ${opts.maxBodyBytes} bytes (declared by Content-Length).`));
+          return;
+        }
 
         res.on("data", (chunk: Buffer) => {
           received += chunk.length;

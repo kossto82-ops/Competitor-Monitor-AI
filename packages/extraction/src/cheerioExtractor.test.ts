@@ -93,4 +93,32 @@ describe("CheerioExtractor", () => {
     expect(a.contentHash).toBe(b.contentHash);
     expect(a.structuredDataHash).toBe(b.structuredDataHash);
   });
+
+  it("does not fetch the page and reports a clear failure when robots.txt disallows it", async () => {
+    let fetched = false;
+    const fetchFn: FetchFn = async () => {
+      fetched = true;
+      return { status: 200, body: "<html></html>", finalUrl: "https://a.test/pricing" };
+    };
+    const extractor = new CheerioExtractor(fetchFn, { isAllowed: async () => false });
+    const result = await extractor.extract({ url: "https://a.test/pricing" });
+    expect(fetched).toBe(false);
+    expect(result.errorMessage).toMatch(/robots\.txt/);
+    expect(result.extractedEntities).toEqual([]);
+  });
+
+  it("fetches normally when robots.txt allows the page", async () => {
+    const fetchFn: FetchFn = async () => ({ status: 200, body: "<html><body>Pro $10</body></html>", finalUrl: "https://a.test/pricing" });
+    const extractor = new CheerioExtractor(fetchFn, { isAllowed: async () => true });
+    const result = await extractor.extract({ url: "https://a.test/pricing" });
+    expect(result.errorMessage).toBeNull();
+  });
+
+  it("surfaces an unsupported content type as an ordinary failed extraction, not a throw", async () => {
+    const fetchFn: FetchFn = async () => {
+      throw new Error('Unsupported content type "application/pdf" - only web pages can be monitored.');
+    };
+    const result = await new CheerioExtractor(fetchFn).extract({ url: "https://a.test/file" });
+    expect(result.errorMessage).toMatch(/Unsupported content type/);
+  });
 });

@@ -126,7 +126,13 @@ URLs of one site that are due on the same tick are enqueued 30 s apart plus up t
 failed, data still fresh), Stale (last success older than 3x its cadence, minimum 48 h), Paused, Not scanned
 yet, or Stopped automatically. The scheduler stops (pauses, keeping history) a source with 10+ consecutive
 failures and no success for 14 days (`CMA_SOURCE_DISABLE_MIN_FAILURES` / `CMA_SOURCE_DISABLE_AFTER_DAYS`);
-resuming it in the UI clears the stop and its failure streak. This pass only runs while the scheduler runs. See
+resuming it in the UI clears the stop and its failure streak. This pass only runs while the scheduler runs.
+
+**Fetch limits and robots.txt (Phase 29 B3).** Only web pages are monitored: a 2xx response that is not
+HTML/XHTML is refused before its body is downloaded, and bodies over 3 MB (`CMA_FETCH_MAX_BODY_BYTES`) fail
+the scan. The monitor honours each site's robots.txt for its user agent (`CMA_ROBOTS_MODE=respect`, the
+default; `off` for sources you own). A page the site disallows fails with an explicit message and, if it
+keeps failing, ends in the automatic stop above. A missing or unreachable robots.txt never blocks a scan. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 

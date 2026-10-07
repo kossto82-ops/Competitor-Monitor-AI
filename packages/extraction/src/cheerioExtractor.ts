@@ -10,6 +10,7 @@ import {
 } from "./structuredData.js";
 import { extractHtmlPromotionEntities, mergeHtmlPromotionsWithJsonLd } from "./htmlPromotions.js";
 import type { Extractor, FetchFn } from "./types.js";
+import type { RobotsChecker } from "./robots.js";
 
 /**
  * Tiers 2-3 combined: parses the HTML DOM for visible text and pulls
@@ -21,11 +22,21 @@ import type { Extractor, FetchFn } from "./types.js";
 export class CheerioExtractor implements Extractor {
   readonly method = "CHEERIO" as const;
 
-  constructor(private readonly fetchFn: FetchFn = defaultFetch) {}
+  /**
+   * `robots` is opt-in (the pipeline passes one built from CMA_ROBOTS_MODE): unit tests that inject
+   * a fake `fetchFn` must never trigger a real robots.txt request.
+   */
+  constructor(
+    private readonly fetchFn: FetchFn = defaultFetch,
+    private readonly robots?: Pick<RobotsChecker, "isAllowed">,
+  ) {}
 
   async extract({ url }: { url: string }): Promise<ExtractionResult> {
     const start = Date.now();
     try {
+      if (this.robots && !(await this.robots.isAllowed(url))) {
+        return this.failure(url, null, null, "This page is disallowed for automated access by the site's robots.txt.", Date.now() - start);
+      }
       const page = await this.fetchFn(url);
       const durationMs = Date.now() - start;
 

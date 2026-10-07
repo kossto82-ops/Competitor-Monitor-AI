@@ -1,5 +1,5 @@
 import type { ExtractedEntity, ExtractionResult, ComparisonResult } from "@cma/core";
-import { CheerioExtractor, type Extractor } from "@cma/extraction";
+import { CheerioExtractor, createRobotsCheckerFromEnv, defaultFetch, type Extractor } from "@cma/extraction";
 import { compareSnapshots, type PriorSnapshotData } from "@cma/detection";
 import * as db from "@cma/db";
 import type { MonitoringJobPayload } from "@cma/queue";
@@ -73,7 +73,7 @@ export interface PipelineDeps {
 
 export function createDefaultPipelineDeps(): PipelineDeps {
   return {
-    extractor: new CheerioExtractor(),
+    extractor: new CheerioExtractor(defaultFetch, createRobotsCheckerFromEnv()),
     getMonitoredUrlForOrg: db.getMonitoredUrlForOrg,
     getLatestVerifiedSnapshot: db.getLatestVerifiedSnapshot,
     createRunningMonitoringJob: db.createRunningMonitoringJob,
