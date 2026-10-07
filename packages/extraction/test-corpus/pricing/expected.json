@@ -1,0 +1,240 @@
+{
+  "cards-basic.html": [
+    {
+      "name": "Starter",
+      "amount": 9,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Pro",
+      "amount": 29,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Business",
+      "amount": 99,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "toggle-monthly-annual.html": [
+    {
+      "name": "Solo",
+      "amount": 10,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Solo",
+      "amount": 96,
+      "currency": "USD",
+      "period": "year"
+    },
+    {
+      "name": "Team",
+      "amount": 25,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Team",
+      "amount": 240,
+      "currency": "USD",
+      "period": "year"
+    }
+  ],
+  "table-columns.html": [
+    {
+      "name": "Basic",
+      "amount": 12,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Team",
+      "amount": 40,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "european-format.html": [
+    {
+      "name": "Essentiel",
+      "amount": 29.9,
+      "currency": "EUR",
+      "period": "month"
+    },
+    {
+      "name": "Entreprise",
+      "amount": 1299,
+      "currency": "EUR",
+      "period": "year"
+    }
+  ],
+  "strikethrough-old-price.html": [
+    {
+      "name": "Pro",
+      "amount": 39,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Team",
+      "amount": 79,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "free-and-contact-sales.html": [
+    {
+      "name": "Free",
+      "amount": 0,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Growth",
+      "amount": 15,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "class-named-plans.html": [
+    {
+      "name": "Launch",
+      "amount": 19,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Scale",
+      "amount": 79,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "per-seat.html": [
+    {
+      "name": "Standard",
+      "amount": 12,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Premium",
+      "amount": 20,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "non-pricing-blog.html": [],
+  "prefixed-currencies.html": [
+    {
+      "name": "Lite",
+      "amount": 29,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Plus",
+      "amount": 49,
+      "currency": "CHF",
+      "period": "month"
+    },
+    {
+      "name": "Max",
+      "amount": 89,
+      "currency": "AUD",
+      "period": "month"
+    }
+  ],
+  "ambiguous-grid-no-names.html": [],
+  "table-rows.html": [
+    {
+      "name": "Basic",
+      "amount": 10,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Pro",
+      "amount": 25,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Business",
+      "amount": 60,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "noise-banner-and-footer-prices.html": [
+    {
+      "name": "Standard",
+      "amount": 14,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Plus",
+      "amount": 28,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "badges-in-headings.html": [
+    {
+      "name": "Plus",
+      "amount": 10,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Business",
+      "amount": 20,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Standard",
+      "amount": 15,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "BusinessPlus",
+      "amount": 45,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Newsletter",
+      "amount": 5,
+      "currency": "USD",
+      "period": "month"
+    }
+  ],
+  "table-badges-in-headers.html": [
+    {
+      "name": "Plus",
+      "amount": 9.99,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Standard",
+      "amount": 15,
+      "currency": "USD",
+      "period": "month"
+    },
+    {
+      "name": "Advanced",
+      "amount": 24,
+      "currency": "USD",
+      "period": "month"
+    }
+  ]
+}

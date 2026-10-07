@@ -26,8 +26,9 @@ export function extractVisibleText($: cheerio.CheerioAPI): string {
  * page - the detector then re-baselines instead of reporting every monitored page as changed.
  *   1 = whole <body> text (Phases 1-29 B)
  *   2 = main content region with page chrome and volatile text removed
+ *   3 = plan cards/tables become PRICE entities when there is no JSON-LD (Phase 29 C3)
  */
-export const EXTRACTOR_VERSION = 2;
+export const EXTRACTOR_VERSION = 3;
 
 // Page chrome that is not the page's own content. Removed everywhere in the document.
 const ALWAYS_NOISE = "nav, [role='navigation'], [role='banner'], [role='contentinfo'], [role='dialog'], [role='alertdialog'], [role='search']";
@@ -83,7 +84,8 @@ export function extractMainContent($: cheerio.CheerioAPI): MainContent {
 const MIN_USEFUL_CONTENT_CHARS = 100;
 const MIN_WHOLE_BODY_CHARS_FOR_FALLBACK = 400;
 
-function extractCleanedContent($: cheerio.CheerioAPI): MainContent {
+/** A detached copy of <body> with chrome, banners and non-content elements removed (Phase 29 C2). */
+export function cleanBody($: cheerio.CheerioAPI) {
   const $body = $("body").clone();
   $body.find("script, style, noscript, svg, template, iframe").remove();
   $body.find(ALWAYS_NOISE).remove();
@@ -94,7 +96,11 @@ function extractCleanedContent($: cheerio.CheerioAPI): MainContent {
     const name = `${$(el).attr("class") ?? ""} ${$(el).attr("id") ?? ""}`;
     if (NOISE_NAME.test(name)) $(el).remove();
   });
+  return $body;
+}
 
+function extractCleanedContent($: cheerio.CheerioAPI): MainContent {
+  const $body = cleanBody($);
   const bodyText = scrubVolatileText($body.text());
   const $main = $body.find("main, [role='main']").first();
   if ($main.length > 0) {

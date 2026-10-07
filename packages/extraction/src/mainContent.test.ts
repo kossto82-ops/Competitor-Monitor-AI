@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import { describe, expect, it } from "vitest";
-import { extractMainContent, scrubVolatileText } from "./structuredData.js";
+import { EXTRACTOR_VERSION, extractMainContent, scrubVolatileText } from "./structuredData.js";
 import { CheerioExtractor } from "./cheerioExtractor.js";
 import type { FetchFn } from "./types.js";
 
@@ -101,7 +101,7 @@ describe("CheerioExtractor with main-content hashing", () => {
     const b = await new CheerioExtractor(make("two!", "2027")).extract({ url: "https://a.test/pricing" });
     expect(a.contentHash).not.toBeNull();
     expect(a.contentHash).toBe(b.contentHash);
-    expect(a.extractorVersion).toBe(2);
+    expect(a.extractorVersion).toBe(EXTRACTOR_VERSION);
   });
 
   it("changes the hash when the pricing content itself changes", async () => {

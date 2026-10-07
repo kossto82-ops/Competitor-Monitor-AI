@@ -150,7 +150,13 @@ content region, without navigation, site header/footer, cookie banners, pop-ups,
 (timestamps, "3 hours ago", copyright years). Whenever those rules change, bump `EXTRACTOR_VERSION`
 (`packages/extraction/src/structuredData.ts`): the next scan of every URL is then recorded as a new baseline
 with no change events, instead of reporting every page as changed. Expect exactly one such quiet scan per URL
-after deploying a version bump. See
+after deploying a version bump.
+
+**Plan prices without JSON-LD (Phase 29 C3).** For pages with no structured data, the extractor reads pricing
+cards and tables into one `PRICE` entity per plan (key `plan:{name}:{period}`), so a price change shows up as a
+`PRICE_CHANGE` naming the plan. It is measured by `packages/extraction/test-corpus/pricing/` (HTML fixtures plus
+`expected.json`; the test enforces precision and recall of at least 0.95). When you find a real page it gets
+wrong, add it to the corpus with the plans a human reads in it, fix the heuristic, and bump `EXTRACTOR_VERSION`. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 
