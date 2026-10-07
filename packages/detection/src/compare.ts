@@ -1,4 +1,4 @@
-import type { ChangeEventDraft, ComparisonResult, ExtractedEntity, Severity } from "@cma/core";
+import { comparePrices, type ChangeEventDraft, type ComparisonResult, type ExtractedEntity, type Severity } from "@cma/core";
 
 export interface PriorSnapshotData {
   contentHash: string | null;
@@ -74,14 +74,6 @@ function describeExtractionFailure(current: CurrentExtractionData): string | nul
   return null;
 }
 
-function parseNumeric(value: string | null): number | null {
-  if (value === null) return null;
-  const cleaned = value.replace(/[^0-9.-]/g, "");
-  if (cleaned.length === 0) return null;
-  const parsed = Number.parseFloat(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 export function severityForPercentageChange(pctAbs: number): Severity {
   if (pctAbs >= 15) return "HIGH";
   if (pctAbs >= 5) return "MEDIUM";
@@ -112,14 +104,16 @@ function detectPriceChanges(priorEntities: ExtractedEntity[], currentEntities: E
   for (const current of currentEntities) {
     if (current.type !== "PRICE") continue;
     const previous = priorByKey.get(current.key);
-    if (!previous || previous.value === current.value) continue;
+    if (!previous) continue;
 
-    const oldNum = parseNumeric(previous.value);
-    const newNum = parseNumeric(current.value);
+    const currency = current.currency ?? previous.currency;
+    const comparison = comparePrices(previous, current);
 
-    if (oldNum === null || newNum === null || oldNum === 0) {
-      // Can't compute a reliable percentage - still a real, evidenced value
-      // change, just without a derived percentage.
+    if (comparison.kind === "same") continue; // "10" vs "10.00", or the same amount in another locale
+
+    if (comparison.kind === "unparseable") {
+      if (previous.value === current.value && previous.currency === current.currency) continue;
+      // A real, evidenced value change whose numbers we cannot read - reported without a percentage.
       events.push({
         changeType: "PRICE_CHANGE",
         severity: "MEDIUM",
@@ -128,24 +122,59 @@ function detectPriceChanges(priorEntities: ExtractedEntity[], currentEntities: E
         fieldPath: current.key,
         oldValue: previous.value,
         newValue: current.value,
-        currency: current.currency ?? previous.currency,
+        currency,
         percentageChange: null,
         evidenceExcerpt: `${previous.label}: ${previous.value ?? "?"} -> ${current.value ?? "?"}`,
       });
       continue;
     }
 
-    const percentageChange = ((newNum - oldNum) / oldNum) * 100;
+    if (comparison.currencyChanged) {
+      // The currency itself moved: a percentage across currencies would be meaningless, so none is given.
+      const amountNote = comparison.amountChanged ? "" : " (amount unchanged)";
+      events.push({
+        changeType: "PRICE_CHANGE",
+        severity: "MEDIUM",
+        confidence: 0.85,
+        entityKey: current.key,
+        fieldPath: current.key,
+        oldValue: previous.value,
+        newValue: current.value,
+        currency: current.currency ?? previous.currency,
+        percentageChange: null,
+        evidenceExcerpt: `${previous.label}: currency changed ${previous.currency} -> ${current.currency}${amountNote}: ${previous.value} -> ${current.value}`,
+      });
+      continue;
+    }
+
+    if (comparison.percentageChange === null) {
+      // Old amount was 0 (e.g. free -> paid): still a real change, just without a derived percentage.
+      events.push({
+        changeType: "PRICE_CHANGE",
+        severity: "MEDIUM",
+        confidence: 0.7,
+        entityKey: current.key,
+        fieldPath: current.key,
+        oldValue: previous.value,
+        newValue: current.value,
+        currency,
+        percentageChange: null,
+        evidenceExcerpt: `${previous.label}: ${previous.value ?? "?"} -> ${current.value ?? "?"}`,
+      });
+      continue;
+    }
+
     events.push({
       changeType: "PRICE_CHANGE",
-      severity: severityForPercentageChange(Math.abs(percentageChange)),
-      confidence: 0.95,
+      severity: severityForPercentageChange(Math.abs(comparison.percentageChange)),
+      // A number with two valid readings (e.g. "1.299") is less certain than an unambiguous one.
+      confidence: comparison.ambiguous ? 0.8 : 0.95,
       entityKey: current.key,
       fieldPath: current.key,
       oldValue: previous.value,
       newValue: current.value,
-      currency: current.currency ?? previous.currency,
-      percentageChange: Math.round(percentageChange * 100) / 100,
+      currency,
+      percentageChange: comparison.percentageChange,
       evidenceExcerpt: `${previous.label}: ${previous.value} ${previous.currency ?? ""} -> ${current.value} ${current.currency ?? ""}`.trim(),
     });
   }

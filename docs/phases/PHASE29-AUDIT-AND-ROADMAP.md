@@ -139,6 +139,16 @@ Tests: corpus de comportamientos reales (403, 429, redirecciones), resiliencia (
 Extractor determinista de tarjetas/tablas de precio, parser de moneda y locale, normalización por regiones (main, sin nav/footer/banners), evidencia por bloque cambiado, supresión de oscilaciones, snapshot poco fiable → `FAILED_TO_VERIFY`, identidad interna por competidor (renombrado detectado con confianza), confianza y severidad derivadas, unicidad en `ChangeEvent`, `organizationId` en `ExtractedEntity`. Errores: E5-E13, E25, E26, E37.
 Tests: corpus de HTML real versionado; la fase se mide por precisión/recall sobre el corpus.
 
+| Parte | Contenido | Errores |
+|---|---|---|
+| C1 ✅ | Hecho: `packages/core/src/money.ts`: `parseAmount` por locale (`1,299.00`, `1.299,00`, `1 299,00`, `1'299.00`, agrupación india, nbsp), `detectCurrency` (€ £ ₹ ₩ ₽ ₺ ₪ ₫ ฿ ₱ zł Kč, `US$ CA$ AU$ R$ …`, códigos ISO; `$` y `¥` marcados ambiguos), `normalizeCurrencyCode` y `comparePrices`. El detector deja de comparar strings: `10` vs `10.00` o el mismo importe en dos locales ya no es un cambio; un cambio solo de moneda se detecta (sin porcentaje); si cambian importe y moneda no se da porcentaje; el % de `1.299,00` → `1.499,00` es +15,4 % (antes error de 1000x); un número con dos lecturas válidas (`1.299`) baja la confianza de 0,95 a 0,8. **Límites:** `1.299` sigue siendo ambiguo (se lee 1299 por convención de precios); la extracción de precios del texto (entidades `GENERIC`) no se ha tocado todavía y sigue sin entrar en el diff (C3); la severidad sigue basada en el porcentaje (C4) | E12 |
+| C2 | Regiones de contenido: hash solo del contenido principal (sin nav/header/footer/banners de cookies/contadores), versión del extractor por snapshot para que un cambio de extractor sea línea base y no un falso cambio | E7 |
+| C3 | Extractor determinista de tarjetas y tablas de precio (precio + nombre de plan + periodo), `GENERIC` pasa a `PRICE` con identidad estable, corpus de HTML versionado con precisión/recall | E5, E11 |
+| C4 | Calidad del diff: evidencia por bloque cambiado, `CONTENT_CHANGE` no suprimido por eventos de entidad, hash estructurado normalizado (sin JSON-LD bruto), página JS/shell → `FAILED_TO_VERIFY`, confianza y severidad derivadas, supresión de oscilaciones | E6, E8, E9, E10, E13 |
+| C5 | Identidad y datos: renombrado con confianza, unicidad en `ChangeEvent`, `organizationId` en `ExtractedEntity`, código muerto | E11, E25, E37 |
+
+Nota sobre el corpus: ninguna página de terceros se copia al repositorio sin que lo decidas tú; el corpus de C3 se construye con fixtures escritas a mano que reproducen estructuras reales (tarjetas, tablas, banners, nav/footer) y, si quieres medir contra sitios reales, con las URLs que me indiques.
+
 ### Fase D — Signals y priorización explicable (2-3 semanas)
 
 Tablas `Entity/EntityVersion`, `Signal/SignalEvidence` (promoción solo por reglas sobre eventos verificados), prioridad explicable (magnitud, recencia, frecuencia, nº de competidores, categoría estratégica elegida por el cliente, relevancia del competidor, significancia histórica; desglose por factor, pesos configurables y versionados; **importance** separada de **confidence**), alertas con niveles definidos por reglas observables, deduplicación y explicación obligatoria, primer dashboard "qué debes saber hoy". Errores: E27, E28, E16 (sesión), E33.

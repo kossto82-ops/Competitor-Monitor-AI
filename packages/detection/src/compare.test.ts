@@ -286,4 +286,61 @@ describe("compareSnapshots - promotion added/changed/removed", () => {
     expect(result.verificationState).toBe("FAILED_TO_VERIFY");
     expect(result.changeEvents).toHaveLength(0);
   });
+
+  describe("price parsing and currency (Phase 29 C1)", () => {
+    const changed = (priorEntity: ExtractedEntity, currentEntity: ExtractedEntity) =>
+      compareSnapshots(
+        makePrior({ entities: [priorEntity] }),
+        makeCurrent({ contentHash: "hash-b", structuredDataHash: "struct-b", entities: [currentEntity] }),
+      );
+
+    it("reads European-format prices correctly: 1.299,00 -> 1.499,00 is +15.4%, not a 1000x error", () => {
+      const result = changed(priceEntity({ value: "1.299,00" }), priceEntity({ value: "1.499,00" }));
+      const event = result.changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+      expect(event.percentageChange).toBe(15.4);
+      expect(event.severity).toBe("HIGH");
+    });
+
+    it("does not report 10 -> 10.00 (same price, different formatting) as a price change", () => {
+      const result = changed(priceEntity({ value: "10" }), priceEntity({ value: "10.00" }));
+      expect(result.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(false);
+    });
+
+    it("does not report the same amount in two locales as a price change", () => {
+      const result = changed(priceEntity({ value: "1,299.00" }), priceEntity({ value: "1.299,00" }));
+      expect(result.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(false);
+    });
+
+    it("reports a currency change with the same number, with no percentage", () => {
+      const result = changed(priceEntity({ value: "10", currency: "USD" }), priceEntity({ value: "10", currency: "EUR" }));
+      const event = result.changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+      expect(event).toBeDefined();
+      expect(event.percentageChange).toBeNull();
+      expect(event.evidenceExcerpt).toContain("currency changed USD -> EUR");
+      expect(event.evidenceExcerpt).toContain("amount unchanged");
+    });
+
+    it("gives no percentage when the amount and the currency both changed", () => {
+      const result = changed(priceEntity({ value: "10", currency: "USD" }), priceEntity({ value: "12", currency: "EUR" }));
+      const event = result.changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+      expect(event.percentageChange).toBeNull();
+    });
+
+    it("lowers confidence when the number has two valid readings", () => {
+      const result = changed(priceEntity({ value: "1.299" }), priceEntity({ value: "1.499" }));
+      expect(result.changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!.confidence).toBe(0.8);
+    });
+
+    it("still reports a free-to-paid move, without a percentage", () => {
+      const result = changed(priceEntity({ value: "0" }), priceEntity({ value: "9.00" }));
+      const event = result.changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+      expect(event.percentageChange).toBeNull();
+    });
+
+    it("keeps reporting a non-numeric value change as evidenced, without a percentage", () => {
+      const result = changed(priceEntity({ value: "Contact sales" }), priceEntity({ value: "From 99" }));
+      const event = result.changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+      expect(event.percentageChange).toBeNull();
+    });
+  });
 });
