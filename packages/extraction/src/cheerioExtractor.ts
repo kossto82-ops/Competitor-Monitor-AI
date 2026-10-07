@@ -23,6 +23,20 @@ import type { RobotsChecker } from "./robots.js";
  * for every URL - HttpExtractor exists as the simpler tier of the same
  * interface, not as a required first step every scan has to repeat.
  */
+/**
+ * Hash of the FACTS the entities carry (what it is, what it costs, in which currency) and nothing else.
+ * The previous hash covered the raw JSON-LD text and the context-hashed GENERIC prices, so a changed
+ * rating, date or sentence near a price made the page "CHANGED" with no event to show for it. GENERIC
+ * entities are evidence only and never enter the diff, so they do not enter the hash either.
+ */
+export function structuredDataHashOf(entities: ExtractedEntity[]): string | null {
+  const facts = entities
+    .filter((e) => e.type !== "GENERIC")
+    .map((e) => ({ type: e.type, key: e.key, label: e.label, value: e.value, currency: e.currency }))
+    .sort((a, b) => `${a.type}|${a.key}`.localeCompare(`${b.type}|${b.key}`));
+  return facts.length > 0 ? sha256(JSON.stringify(facts)) : null;
+}
+
 export class CheerioExtractor implements Extractor {
   readonly method = "CHEERIO" as const;
 
@@ -91,10 +105,18 @@ export class CheerioExtractor implements Extractor {
       let confidence = 1;
 
       if (looksLikeJsShell($, wholeBodyText)) {
-        warnings.push(
-          "Page looks like a client-rendered application shell; HTTP+Cheerio extraction may be incomplete. Consider a Playwright-based extractor for this URL.",
+        // Phase 29 C4: an empty application shell is not a page we observed. Comparing its skeleton with
+        // a fully rendered page (or two skeletons with each other) produced false PRODUCT_ADDED/REMOVED
+        // events, and recording the scan as a success hid that the source cannot be monitored at all.
+        // It is now an unverified scan: no change is inferred, the failure counts toward the source's
+        // health, and the message tells the customer why.
+        return this.failure(
+          url,
+          page.finalUrl,
+          page.status,
+          "The page has too little readable content: it looks like a client-rendered application (its content is built in the browser) or is nearly empty, so it cannot be monitored without a browser.",
+          durationMs,
         );
-        confidence = Math.min(confidence, 0.3);
       }
 
       if (visibleText.length === 0) {
@@ -114,7 +136,7 @@ export class CheerioExtractor implements Extractor {
         errorMessage: null,
         normalizedContent: visibleText,
         contentHash: visibleText.length > 0 ? sha256(visibleText) : null,
-        structuredDataHash: entities.length > 0 ? sha256(JSON.stringify(entities)) : null,
+        structuredDataHash: structuredDataHashOf(entities),
         extractedEntities: entities,
         confidence,
         warnings,

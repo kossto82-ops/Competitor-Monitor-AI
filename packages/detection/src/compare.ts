@@ -1,4 +1,5 @@
-import { comparePrices, type ChangeEventDraft, type ComparisonResult, type ExtractedEntity, type Severity } from "@cma/core";
+import { comparePrices, parseAmount, type ChangeEventDraft, type ComparisonResult, type ExtractedEntity, type Severity } from "@cma/core";
+import { diffText, type TextHunk } from "./textDiff.js";
 
 export interface PriorSnapshotData {
   /** Version of the extraction logic that produced this snapshot (Phase 29 C2); absent = unknown, assumed comparable. */
@@ -11,6 +12,8 @@ export interface PriorSnapshotData {
 
 export interface CurrentExtractionData {
   extractorVersion?: number;
+  /** 0-1 quality of the extraction itself (Phase 29 C4); lowers the confidence of every event drawn from it. Absent = 1. */
+  confidence?: number;
   httpStatus: number | null;
   errorMessage: string | null;
   contentHash: string | null;
@@ -26,7 +29,22 @@ export interface CurrentExtractionData {
  * ChangeEvent drafts. No AI call happens here or is needed here - this
  * is the "source of truth" step the brief requires (Section 1/3).
  */
-export function compareSnapshots(prior: PriorSnapshotData | null, current: CurrentExtractionData): ComparisonResult {
+/** A change already recorded for the same URL; used to recognise a value that flips back and forth. */
+export interface RecentChangeEvent {
+  entityKey: string | null;
+  changeType: string;
+  oldValue: string | null;
+  newValue: string | null;
+  currency: string | null;
+  detectedAt: Date;
+}
+
+export interface CompareOptions {
+  recentEvents?: RecentChangeEvent[];
+  now?: Date;
+}
+
+export function compareSnapshots(prior: PriorSnapshotData | null, current: CurrentExtractionData, options: CompareOptions = {}): ComparisonResult {
   const failureReason = describeExtractionFailure(current);
   if (failureReason) {
     return { verificationState: "FAILED_TO_VERIFY", reason: failureReason, changeEvents: [] };
@@ -51,16 +69,25 @@ export function compareSnapshots(prior: PriorSnapshotData | null, current: Curre
     return { verificationState: "NO_CHANGE", reason: "Content and structured data hashes are unchanged.", changeEvents: [] };
   }
 
-  const changeEvents: ChangeEventDraft[] = [
+  const entityEvents: ChangeEventDraft[] = [
     ...detectPriceChanges(prior.entities, current.entities),
     ...detectProductAddedOrRemoved(prior.entities, current.entities),
     ...detectPromotionChanges(prior.entities, current.entities),
     ...detectPromotionAddedOrRemoved(prior.entities, current.entities),
-  ];
+  ].map((event) => finalizeEvent(event, current.confidence ?? 1));
+  const changeEvents = flagOscillations(entityEvents, options.recentEvents ?? [], options.now ?? new Date());
 
-  const explainedByEntities = changeEvents.length > 0;
-  if (!explainedByEntities && current.contentHash !== prior.contentHash) {
-    changeEvents.push(detectGenericContentChange(prior.normalizedContent, current.normalizedContent));
+  // Phase 29 C4: the page text is diffed block by block. Changes that an entity event already explains
+  // (the price digits of a PRICE_CHANGE, the card of a PRODUCT_ADDED) are not repeated as a vague
+  // content change, but text that changed for any OTHER reason is no longer hidden just because some
+  // entity event exists on the same page.
+  if (current.contentHash !== prior.contentHash) {
+    const diff = diffText(prior.normalizedContent, current.normalizedContent);
+    const hints = buildExplanationHints(changeEvents, prior.entities, current.entities);
+    const unexplained = diff.hunks.filter((hunk) => !isHunkExplained(hunk, hints));
+    if (unexplained.length > 0) {
+      changeEvents.push(finalizeEvent(buildContentChangeEvent(unexplained, diff.truncated), current.confidence ?? 1));
+    }
   }
 
   return {
@@ -341,18 +368,152 @@ function detectPromotionAddedOrRemoved(priorEntities: ExtractedEntity[], current
   return events;
 }
 
-function detectGenericContentChange(previousText: string, currentText: string): ChangeEventDraft {
-  const excerptLength = 300;
+// ---------------------------------------------------------------------------------------------
+// Phase 29 C4: evidence per changed block, derived confidence/severity, oscillation
+// ---------------------------------------------------------------------------------------------
+
+const EXCERPT_MAX = 300;
+const MAX_HUNKS_IN_EVIDENCE = 3;
+
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function buildContentChangeEvent(hunks: TextHunk[], truncated: boolean): ChangeEventDraft {
+  const shown = hunks.slice(0, MAX_HUNKS_IN_EVIDENCE);
+  const removed = shown.map((h) => h.removed).filter((t) => t.length > 0).join(" … ");
+  const added = shown.map((h) => h.added).filter((t) => t.length > 0).join(" … ");
+  const detail = shown
+    .map((h) => `"…${[h.before, `[${h.removed || "(nothing)"} → ${h.added || "(nothing)"}]`, h.after].filter(Boolean).join(" ")}…"`)
+    .join(" | ");
+  const more = hunks.length > shown.length ? ` (+${hunks.length - shown.length} more changed passages)` : "";
+  const note = truncated ? " The page changed so extensively that only an approximate comparison was possible." : "";
   return {
     changeType: "CONTENT_CHANGE",
     severity: "LOW",
-    confidence: 0.5,
+    // A text change that no structured entity explains is real but unspecific; a wholesale rewrite even more so.
+    confidence: truncated || hunks.length > 10 ? 0.5 : 0.6,
     entityKey: null,
     fieldPath: "page.visibleText",
-    oldValue: previousText.slice(0, excerptLength),
-    newValue: currentText.slice(0, excerptLength),
+    oldValue: removed.length > 0 ? clip(removed, EXCERPT_MAX) : null,
+    newValue: added.length > 0 ? clip(added, EXCERPT_MAX) : null,
     currency: null,
     percentageChange: null,
-    evidenceExcerpt: `Visible page text changed (showing first ${excerptLength} characters of each version).`,
+    evidenceExcerpt: clip(`Changed text: ${detail}${more}.${note}`, 600),
   };
+}
+
+interface ExplanationHints {
+  /** Lowercased words that belong to the changed entities (plan names, labels). */
+  words: Set<string>;
+  amounts: number[];
+  /** For added/removed items: the whole item (name, features, price) is the explanation. */
+  wholeLabels: string[];
+}
+
+const PERIOD_AND_CURRENCY_WORDS = new Set(["mo", "month", "monthly", "yr", "year", "yearly", "annual", "annually", "per", "billed", "usd", "eur", "gbp", "user", "seat"]);
+
+function bare(token: string): string {
+  return token.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function numbersIn(text: string | null): number[] {
+  if (!text) return [];
+  const out: number[] = [];
+  for (const match of text.matchAll(/\d[\d.,]*/g)) {
+    const n = parseAmount(match[0]);
+    if (n !== null) out.push(n);
+  }
+  return out;
+}
+
+function buildExplanationHints(events: ChangeEventDraft[], priorEntities: ExtractedEntity[], currentEntities: ExtractedEntity[]): ExplanationHints {
+  const words = new Set<string>();
+  const amounts: number[] = [];
+  const wholeLabels: string[] = [];
+  const byKeyAll = new Map<string, ExtractedEntity>();
+  for (const e of [...priorEntities, ...currentEntities]) byKeyAll.set(e.key, e);
+
+  for (const event of events) {
+    const entity = event.entityKey ? byKeyAll.get(event.entityKey) : undefined;
+    const label = entity?.label ?? "";
+    for (const word of label.split(/\s+/)) {
+      const w = bare(word);
+      if (w) words.add(w);
+    }
+    amounts.push(...numbersIn(event.oldValue), ...numbersIn(event.newValue));
+    if ((event.changeType === "PRODUCT_ADDED" || event.changeType === "PRODUCT_REMOVED" || event.changeType === "PROMOTION_ADDED" || event.changeType === "PROMOTION_REMOVED") && label.trim()) {
+      wholeLabels.push(label.trim().toLowerCase());
+    }
+  }
+  return { words, amounts, wholeLabels };
+}
+
+function isHunkExplained(hunk: TextHunk, hints: ExplanationHints): boolean {
+  const removed = hunk.removed.toLowerCase();
+  const added = hunk.added.toLowerCase();
+  if (hints.wholeLabels.some((label) => removed.includes(label) || added.includes(label))) return true;
+
+  const tokens = [...hunk.removed.split(/\s+/), ...hunk.added.split(/\s+/)].filter((t) => t.length > 0);
+  if (tokens.length === 0) return true;
+  return tokens.every((token) => {
+    const w = bare(token);
+    if (w === "") return true; // punctuation or a bare currency symbol
+    if (hints.words.has(w) || PERIOD_AND_CURRENCY_WORDS.has(w)) return true;
+    const numbers = numbersIn(token);
+    return numbers.length > 0 && numbers.every((n) => hints.amounts.some((a) => Math.abs(a - n) < 0.005));
+  });
+}
+
+/** Where an entity's value came from decides how far its change can be trusted. */
+function sourceFactor(entityKey: string | null): number {
+  if (!entityKey) return 1;
+  if (entityKey.startsWith("jsonld")) return 1; // machine-readable by design
+  if (entityKey.startsWith("plan:")) return 0.92; // read from a pricing card/table
+  if (entityKey.startsWith("html-promo:")) return 0.8; // matched in visible text
+  if (entityKey.startsWith("text-price:")) return 0.6; // a bare price pattern with no name
+  return 0.9;
+}
+
+/**
+ * Confidence = what the rule can establish (the event's own base value) x how good the extraction was
+ * x how trustworthy the source of the entity is. Severity never rises above what the evidence supports:
+ * a low-confidence event is shown one level lower.
+ */
+function finalizeEvent(event: ChangeEventDraft, extractionConfidence: number): ChangeEventDraft {
+  const quality = Math.min(1, Math.max(0, extractionConfidence));
+  const confidence = Math.round(Math.min(1, event.confidence * quality * sourceFactor(event.entityKey)) * 100) / 100;
+  let severity = event.severity;
+  if (confidence < 0.6) severity = severity === "HIGH" ? "MEDIUM" : "LOW";
+  return { ...event, confidence, severity };
+}
+
+const OSCILLATION_WINDOW_MS = 48 * 60 * 60_000;
+
+/**
+ * A price that flips A -> B and, within two days, B -> A is much more often an A/B test, a regional
+ * variant or a rotating experiment than two real repricings. The event is kept (it is real evidence)
+ * but reported as low severity and low confidence, with the reversal stated in its evidence.
+ */
+function flagOscillations(events: ChangeEventDraft[], recent: RecentChangeEvent[], now: Date): ChangeEventDraft[] {
+  if (recent.length === 0) return events;
+  return events.map((event) => {
+    if (event.changeType !== "PRICE_CHANGE" || !event.entityKey) return event;
+    const reverted = recent.find(
+      (r) =>
+        r.changeType === "PRICE_CHANGE" &&
+        r.entityKey === event.entityKey &&
+        now.getTime() - r.detectedAt.getTime() <= OSCILLATION_WINDOW_MS &&
+        comparePrices({ value: r.newValue, currency: r.currency }, { value: event.oldValue, currency: event.currency }).kind === "same" &&
+        comparePrices({ value: r.oldValue, currency: r.currency }, { value: event.newValue, currency: event.currency }).kind === "same",
+    );
+    if (!reverted) return event;
+    const hours = Math.max(1, Math.round((now.getTime() - reverted.detectedAt.getTime()) / 3_600_000));
+    return {
+      ...event,
+      severity: "LOW",
+      confidence: Math.round(event.confidence * 0.5 * 100) / 100,
+      evidenceExcerpt: `${event.evidenceExcerpt} Reverts the change detected ${hours}h ago (possible A/B test or regional pricing).`,
+    };
+  });
 }

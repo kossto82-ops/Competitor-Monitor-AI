@@ -71,4 +71,36 @@ describe("plan price detection without JSON-LD (Phase 29 C3)", () => {
     const result = compareSnapshots(asPrior(await scan(tarif("1.299,00 &euro;"))), asCurrent(await scan(tarif("1.499,00 &euro;"))));
     expect(result.changeEvents.find((e) => e.changeType === "PRICE_CHANGE")).toMatchObject({ currency: "EUR", percentageChange: 15.4 });
   });
+
+  describe("application shells and content evidence (Phase 29 C4)", () => {
+    it("never turns an empty application shell into PRODUCT_REMOVED events: the scan is unverified", async () => {
+      const before = await scan(page([card("Starter", "$9"), card("Pro", "$29")]));
+      const shell = await scan(`<html><body><div id="root"></div></body></html>`);
+      expect(shell.errorMessage).toMatch(/client-rendered application/);
+      const result = compareSnapshots(asPrior(before), asCurrent(shell));
+      expect(result.verificationState).toBe("FAILED_TO_VERIFY");
+      expect(result.changeEvents).toEqual([]);
+    });
+
+    it("reports an edited paragraph with what changed, and a changed price separately, on the same page", async () => {
+      const withText = (price: string, text: string) =>
+        `<html><body><main><h1>Pricing</h1><p>Plans that scale with your team and your budget, month after month, without surprises.</p>${card("Pro", price)}<p>${text}</p></main></body></html>`;
+      const before = await scan(withText("$29", "Every plan includes a free trial of fourteen days with no card required."));
+      const after = await scan(withText("$39", "Every plan includes a free trial of thirty days with no card required."));
+      const events = compareSnapshots(asPrior(before), asCurrent(after)).changeEvents;
+      expect(events.map((e) => e.changeType).sort()).toEqual(["CONTENT_CHANGE", "PRICE_CHANGE"]);
+      const content = events.find((e) => e.changeType === "CONTENT_CHANGE")!;
+      expect(content.oldValue).toBe("fourteen");
+      expect(content.newValue).toBe("thirty");
+    });
+
+    it("does not report CHANGED when only a rating or other JSON-LD detail moved (the structured hash covers facts only)", async () => {
+      const ld = (rating: string) =>
+        `<html><body><main><h1>Pro Plan</h1><p>The plan most teams choose, with everything needed to ship, support included for every user.</p></main><script type="application/ld+json">{"@type":"Product","name":"Pro Plan","aggregateRating":{"ratingValue":"${rating}"},"offers":{"@type":"Offer","price":"39.00","priceCurrency":"EUR"}}</script></body></html>`;
+      const a = await scan(ld("4.1"));
+      const b = await scan(ld("4.9"));
+      expect(a.structuredDataHash).toBe(b.structuredDataHash);
+      expect(compareSnapshots(asPrior(a), asCurrent(b)).verificationState).toBe("NO_CHANGE");
+    });
+  });
 });

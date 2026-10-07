@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { CheerioExtractor } from "./cheerioExtractor.js";
 import type { FetchFn } from "./types.js";
 
+const FILLER = "Plans and pricing for teams of every size, with monthly billing and the freedom to cancel at any time.";
+
 const jsonLdHtml = `
 <html><body>
   <h1>Pro Plan</h1>
+  <p>${FILLER}</p>
   <script type="application/ld+json">
     { "@type": "Product", "name": "Pro Plan", "offers": { "@type": "Offer", "price": "39.00", "priceCurrency": "EUR" } }
   </script>
@@ -13,6 +16,7 @@ const jsonLdHtml = `
 
 const genericPriceHtml = `
 <html><body>
+  <p>${FILLER}</p>
   <div class="price">Only €39 this month!</div>
 </body></html>
 `;
@@ -51,20 +55,33 @@ describe("CheerioExtractor", () => {
   });
 
   it("removes script/style content from the normalized visible text", async () => {
-    const html = `<html><body><style>.x{color:red}</style><script>var x=1;</script><p>Real content</p></body></html>`;
+    const html = `<html><body><style>.x{color:red}</style><script>var x=1;</script><p>Real content ${FILLER}</p></body></html>`;
     const result = await new CheerioExtractor(fetchReturning(html)).extract({ url: "https://competitor.test/" });
 
-    expect(result.normalizedContent).toBe("Real content");
+    expect(result.normalizedContent).toBe(`Real content ${FILLER}`);
     expect(result.normalizedContent).not.toContain("color:red");
   });
 
-  it("flags a likely SPA shell with a low-confidence warning instead of silently succeeding", async () => {
+  it("treats an empty application shell as an unverified scan (a failure), not as a successful one with a warning", async () => {
     const result = await new CheerioExtractor(fetchReturning(spaShellHtml)).extract({
       url: "https://competitor.test/",
     });
 
-    expect(result.confidence).toBeLessThan(0.5);
-    expect(result.warnings.some((w) => w.includes("client-rendered"))).toBe(true);
+    expect(result.errorMessage).toMatch(/client-rendered application/);
+    expect(result.confidence).toBe(0);
+    expect(result.contentHash).toBeNull();
+    expect(result.extractedEntities).toEqual([]);
+  });
+
+  it("treats a nearly empty page (a block or error page) the same way", async () => {
+    const result = await new CheerioExtractor(fetchReturning("<html><body><p>Access denied</p></body></html>")).extract({ url: "https://competitor.test/" });
+    expect(result.errorMessage).toMatch(/too little readable content/);
+  });
+
+  it("does not take a server-rendered app with real text in its root for a shell", async () => {
+    const html = `<html><body><div id="root"><h1>Pricing</h1><p>${FILLER}</p></div></body></html>`;
+    const result = await new CheerioExtractor(fetchReturning(html)).extract({ url: "https://competitor.test/" });
+    expect(result.errorMessage).toBeNull();
   });
 
   it("does not throw and reports failure material on a non-2xx status", async () => {
@@ -108,7 +125,7 @@ describe("CheerioExtractor", () => {
   });
 
   it("fetches normally when robots.txt allows the page", async () => {
-    const fetchFn: FetchFn = async () => ({ status: 200, body: "<html><body>Pro $10</body></html>", finalUrl: "https://a.test/pricing" });
+    const fetchFn: FetchFn = async () => ({ status: 200, body: `<html><body><p>${FILLER}</p><p>Pro $10</p></body></html>`, finalUrl: "https://a.test/pricing" });
     const extractor = new CheerioExtractor(fetchFn, { isAllowed: async () => true });
     const result = await extractor.extract({ url: "https://a.test/pricing" });
     expect(result.errorMessage).toBeNull();
@@ -145,7 +162,7 @@ describe("CheerioExtractor", () => {
   it("surfaces the response validators on a successful full fetch", async () => {
     const fetchFn: FetchFn = async () => ({
       status: 200,
-      body: "<html><body>Pro $10</body></html>",
+      body: `<html><body><p>${FILLER}</p><p>Pro $10</p></body></html>`,
       finalUrl: "https://a.test/pricing",
       headers: { etag: '"v2"', lastModified: null },
     });

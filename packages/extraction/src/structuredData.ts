@@ -27,8 +27,9 @@ export function extractVisibleText($: cheerio.CheerioAPI): string {
  *   1 = whole <body> text (Phases 1-29 B)
  *   2 = main content region with page chrome and volatile text removed
  *   3 = plan cards/tables become PRICE entities when there is no JSON-LD (Phase 29 C3)
+ *   4 = structured hash covers only entity facts; application shells are unverified (Phase 29 C4)
  */
-export const EXTRACTOR_VERSION = 3;
+export const EXTRACTOR_VERSION = 4;
 
 // Page chrome that is not the page's own content. Removed everywhere in the document.
 const ALWAYS_NOISE = "nav, [role='navigation'], [role='banner'], [role='contentinfo'], [role='dialog'], [role='alertdialog'], [role='search']";
@@ -95,6 +96,12 @@ export function cleanBody($: cheerio.CheerioAPI) {
   $body.find("[class], [id]").each((_, el) => {
     const name = `${$(el).attr("class") ?? ""} ${$(el).attr("id") ?? ""}`;
     if (NOISE_NAME.test(name)) $(el).remove();
+  });
+  // Adjacent elements must not glue their text together ("PlusStandard$9.99"): a space around every
+  // element keeps words apart, which is what lets the text diff point at the exact word that changed.
+  $body.find("*").each((_, el) => {
+    $(el).before(" ");
+    $(el).after(" ");
   });
   return $body;
 }

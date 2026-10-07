@@ -53,6 +53,20 @@ export async function listChangeEventsForCompetitor(organizationId: string, comp
   return listChangeEventsForOrg(organizationId, { competitorId, limit });
 }
 
+/**
+ * Phase 29 C4: the changes already recorded for one monitored URL in the last `sinceMs`, newest first.
+ * The detector uses them to recognise a value that flips back (an A/B test, regional pricing).
+ * Bounded (200 rows) and scoped to the organization like every other read.
+ */
+export async function listRecentChangeEventsForUrl(organizationId: string, monitoredUrlId: string, sinceMs: number, now: Date = new Date()) {
+  return prisma.changeEvent.findMany({
+    where: { organizationId, monitoredUrlId, detectedAt: { gte: new Date(now.getTime() - sinceMs) } },
+    orderBy: { detectedAt: "desc" },
+    take: 200,
+    select: { entityKey: true, changeType: true, oldValue: true, newValue: true, currency: true, detectedAt: true },
+  });
+}
+
 export async function getChangeEventForOrg(organizationId: string, changeEventId: string) {
   return prisma.changeEvent.findFirst({
     where: { id: changeEventId, organizationId },

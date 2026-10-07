@@ -377,4 +377,108 @@ describe("compareSnapshots - promotion added/changed/removed", () => {
       expect(compareSnapshots(prior, current).verificationState).toBe("FAILED_TO_VERIFY");
     });
   });
+
+  describe("evidence per changed block, derived confidence, oscillation (Phase 29 C4)", () => {
+    const FILLER = "Our platform helps teams ship faster with reliable tooling and friendly support every single day of the year.";
+
+    it("shows WHAT changed in a CONTENT_CHANGE, not the first 300 characters of the page", () => {
+      const prior = makePrior({ contentHash: "h1", normalizedContent: `${FILLER} Free trial lasts 14 days for everyone. Contact us anytime.` });
+      const current = makeCurrent({ contentHash: "h2", normalizedContent: `${FILLER} Free trial lasts 30 days for everyone. Contact us anytime.` });
+      const result = compareSnapshots(prior, current);
+      const event = result.changeEvents.find((e) => e.changeType === "CONTENT_CHANGE")!;
+      expect(event.oldValue).toBe("14");
+      expect(event.newValue).toBe("30");
+      expect(event.evidenceExcerpt).toContain("Free trial lasts [14 → 30] days for everyone");
+      // The unchanged header text must not be what the evidence is made of.
+      expect(event.evidenceExcerpt).not.toContain("Our platform helps teams");
+    });
+
+    it("still reports unrelated text that changed on the same page as a price change (it used to be suppressed)", () => {
+      const prior = makePrior({
+        contentHash: "h1",
+        structuredDataHash: "s1",
+        normalizedContent: `${FILLER} Pro Plan 49 EUR per month. Includes email support for all customers.`,
+        entities: [priceEntity({ value: "49.00" })],
+      });
+      const current = makeCurrent({
+        contentHash: "h2",
+        structuredDataHash: "s2",
+        normalizedContent: `${FILLER} Pro Plan 39 EUR per month. Includes phone and chat support for all customers.`,
+        entities: [priceEntity({ value: "39.00" })],
+      });
+      const types = compareSnapshots(prior, current).changeEvents.map((e) => e.changeType);
+      expect(types).toContain("PRICE_CHANGE");
+      expect(types).toContain("CONTENT_CHANGE");
+    });
+
+    it("does not repeat a price change as a vague content change when the price digits are all that moved", () => {
+      const prior = makePrior({ contentHash: "h1", structuredDataHash: "s1", normalizedContent: `${FILLER} Pro Plan 49 EUR per month.`, entities: [priceEntity({ value: "49.00" })] });
+      const current = makeCurrent({ contentHash: "h2", structuredDataHash: "s2", normalizedContent: `${FILLER} Pro Plan 39 EUR per month.`, entities: [priceEntity({ value: "39.00" })] });
+      const types = compareSnapshots(prior, current).changeEvents.map((e) => e.changeType);
+      expect(types).toEqual(["PRICE_CHANGE"]);
+    });
+
+    it("does not repeat an added plan's whole card as a content change", () => {
+      const prior = makePrior({ contentHash: "h1", structuredDataHash: "s1", normalizedContent: `${FILLER} Starter 9 USD`, entities: [priceEntity({ key: "plan:starter:month", label: "Starter", value: "9.00", currency: "USD" })] });
+      const current = makeCurrent({
+        contentHash: "h2",
+        structuredDataHash: "s2",
+        normalizedContent: `${FILLER} Starter 9 USD Team 59 USD 10 seats priority support`,
+        entities: [
+          priceEntity({ key: "plan:starter:month", label: "Starter", value: "9.00", currency: "USD" }),
+          priceEntity({ key: "plan:team:month", label: "Team", value: "59.00", currency: "USD" }),
+        ],
+      });
+      const types = compareSnapshots(prior, current).changeEvents.map((e) => e.changeType);
+      expect(types).toEqual(["PRODUCT_ADDED"]);
+    });
+
+    it("derives confidence from the source of the entity and the quality of the extraction", () => {
+      const run = (key: string, extractionConfidence?: number) => {
+        const prior = makePrior({ entities: [priceEntity({ key, value: "100.00" })] });
+        const current = makeCurrent({ contentHash: "h2", structuredDataHash: "s2", confidence: extractionConfidence, entities: [priceEntity({ key, value: "130.00" })] });
+        return compareSnapshots(prior, current).changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+      };
+      expect(run("jsonld:pro").confidence).toBe(0.95);
+      expect(run("plan:pro:month").confidence).toBe(0.87); // 0.95 x 0.92
+      expect(run("jsonld:pro", 0.5).confidence).toBe(0.48);
+    });
+
+    it("shows a low-confidence event one severity level lower", () => {
+      const prior = makePrior({ entities: [priceEntity({ key: "jsonld:pro", value: "100.00" })] });
+      const current = makeCurrent({ contentHash: "h2", structuredDataHash: "s2", confidence: 0.5, entities: [priceEntity({ key: "jsonld:pro", value: "130.00" })] });
+      const event = compareSnapshots(prior, current).changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+      expect(event.severity).toBe("MEDIUM"); // +30% is HIGH, lowered because confidence 0.48 < 0.6
+    });
+
+    it("flags a price that flips back within 48h as a possible A/B test: LOW severity, half the confidence, reversal stated", () => {
+      const now = new Date("2026-10-07T12:00:00Z");
+      const prior = makePrior({ entities: [priceEntity({ value: "49.00" })] });
+      const current = makeCurrent({ contentHash: "h2", structuredDataHash: "s2", entities: [priceEntity({ value: "39.00" })] });
+      const result = compareSnapshots(prior, current, {
+        now,
+        recentEvents: [{ entityKey: "jsonld:pro plan", changeType: "PRICE_CHANGE", oldValue: "39.00", newValue: "49.00", currency: "EUR", detectedAt: new Date("2026-10-07T00:00:00Z") }],
+      });
+      const event = result.changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+      expect(event.severity).toBe("LOW");
+      expect(event.confidence).toBe(0.48);
+      expect(event.evidenceExcerpt).toContain("Reverts the change detected 12h ago");
+    });
+
+    it("does not flag a reversal that is older than 48h, a different entity, or a different direction", () => {
+      const now = new Date("2026-10-07T12:00:00Z");
+      const prior = makePrior({ entities: [priceEntity({ value: "49.00" })] });
+      const current = makeCurrent({ contentHash: "h2", structuredDataHash: "s2", entities: [priceEntity({ value: "39.00" })] });
+      const base = { entityKey: "jsonld:pro plan", changeType: "PRICE_CHANGE", oldValue: "39.00", newValue: "49.00", currency: "EUR" };
+      for (const recent of [
+        { ...base, detectedAt: new Date("2026-10-04T00:00:00Z") },
+        { ...base, entityKey: "jsonld:other", detectedAt: new Date("2026-10-07T00:00:00Z") },
+        { ...base, oldValue: "29.00", detectedAt: new Date("2026-10-07T00:00:00Z") },
+      ]) {
+        const event = compareSnapshots(prior, current, { now, recentEvents: [recent] }).changeEvents.find((e) => e.changeType === "PRICE_CHANGE")!;
+        expect(event.severity).toBe("HIGH");
+        expect(event.evidenceExcerpt).not.toContain("Reverts");
+      }
+    });
+  });
 });

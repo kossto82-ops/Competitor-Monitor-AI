@@ -35,6 +35,7 @@ function makeDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
     markMonitoringJobFailed: vi.fn().mockResolvedValue(undefined),
     persistMonitoringResult: vi.fn().mockResolvedValue(undefined),
     persistNotModifiedResult: vi.fn().mockResolvedValue(undefined),
+    listRecentChangeEventsForUrl: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
 }
@@ -281,6 +282,50 @@ describe("runMonitoringJob", () => {
         await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
         expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
       }
+    });
+  });
+
+  describe("change quality inputs (Phase 29 C4)", () => {
+    const prior = { id: "snap-1", extractorVersion: EXTRACTOR_VERSION, contentHash: "h1", structuredDataHash: "s1", normalizedContent: "Pro Plan 49 EUR", extractedEntities: [{ type: "PRICE", key: "jsonld:pro", label: "Pro", value: "49.00", currency: "EUR", raw: "" }] };
+    const price = (value: string) => ({ type: "PRICE" as const, key: "jsonld:pro", label: "Pro", value, currency: "EUR", raw: "" });
+
+    it("reads the URL's recent changes (48h) and flags a price that flips back as a possible A/B test", async () => {
+      const recent = [{ entityKey: "jsonld:pro", changeType: "PRICE_CHANGE", oldValue: "39.00", newValue: "49.00", currency: "EUR", detectedAt: new Date(Date.now() - 3 * 3_600_000) }];
+      const deps = makeDeps({
+        extractor: { extract: vi.fn().mockResolvedValue(extractionResult({ extractorVersion: EXTRACTOR_VERSION, contentHash: "h2", structuredDataHash: "s2", extractedEntities: [price("39.00")] })) },
+        getLatestVerifiedSnapshot: vi.fn().mockResolvedValue(prior),
+        listRecentChangeEventsForUrl: vi.fn().mockResolvedValue(recent),
+      });
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+      expect(deps.listRecentChangeEventsForUrl).toHaveBeenCalledWith("org-1", "url-1", 48 * 60 * 60_000);
+      const persisted = (deps.persistMonitoringResult as ReturnType<typeof vi.fn>).mock.calls[0]![1].comparison;
+      const event = persisted.changeEvents.find((e: { changeType: string }) => e.changeType === "PRICE_CHANGE");
+      expect(event.severity).toBe("LOW");
+      expect(event.evidenceExcerpt).toContain("Reverts the change");
+    });
+
+    it("carries the extraction's own confidence into the events it produces", async () => {
+      const deps = makeDeps({
+        extractor: { extract: vi.fn().mockResolvedValue(extractionResult({ extractorVersion: EXTRACTOR_VERSION, confidence: 0.5, contentHash: "h2", structuredDataHash: "s2", extractedEntities: [price("59.00")] })) },
+        getLatestVerifiedSnapshot: vi.fn().mockResolvedValue(prior),
+      });
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+      const persisted = (deps.persistMonitoringResult as ReturnType<typeof vi.fn>).mock.calls[0]![1].comparison;
+      expect(persisted.changeEvents.find((e: { changeType: string }) => e.changeType === "PRICE_CHANGE").confidence).toBe(0.48);
+    });
+
+    it("does not query the history on a baseline scan, and a history read failure never stops the scan", async () => {
+      const baseline = makeDeps();
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, baseline);
+      expect(baseline.listRecentChangeEventsForUrl).not.toHaveBeenCalled();
+
+      const failing = makeDeps({
+        extractor: { extract: vi.fn().mockResolvedValue(extractionResult({ extractorVersion: EXTRACTOR_VERSION, contentHash: "h2", structuredDataHash: "s2", extractedEntities: [price("59.00")] })) },
+        getLatestVerifiedSnapshot: vi.fn().mockResolvedValue(prior),
+        listRecentChangeEventsForUrl: vi.fn().mockRejectedValue(new Error("db hiccup")),
+      });
+      await expect(runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, failing)).resolves.toBeDefined();
+      expect(failing.persistMonitoringResult).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -156,7 +156,15 @@ after deploying a version bump.
 cards and tables into one `PRICE` entity per plan (key `plan:{name}:{period}`), so a price change shows up as a
 `PRICE_CHANGE` naming the plan. It is measured by `packages/extraction/test-corpus/pricing/` (HTML fixtures plus
 `expected.json`; the test enforces precision and recall of at least 0.95). When you find a real page it gets
-wrong, add it to the corpus with the plans a human reads in it, fix the heuristic, and bump `EXTRACTOR_VERSION`. See
+wrong, add it to the corpus with the plans a human reads in it, fix the heuristic, and bump `EXTRACTOR_VERSION`.
+
+**Change evidence and quality (Phase 29 C4).** A `CONTENT_CHANGE` shows the words that changed with their context
+(`Free trial lasts [14 -> 30] days`), not the top of the page. An event's confidence is the rule's own confidence
+times the extraction quality times the reliability of its source (JSON-LD 1.0, pricing card 0.92, HTML promotion
+0.8, bare price 0.6); a low-confidence event is shown one severity level lower. A price that returns to its previous
+value within 48 hours is kept but marked low severity as a probable A/B test or regional price. A page that is an empty
+client-rendered application (or nearly empty) is an unverified scan, not a successful one: it counts against the
+source's health and never produces added/removed events. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 

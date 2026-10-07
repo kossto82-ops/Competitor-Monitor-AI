@@ -1,6 +1,6 @@
 import type { ExtractedEntity, ExtractionResult, ComparisonResult } from "@cma/core";
 import { CheerioExtractor, createRobotsCheckerFromEnv, defaultFetch, EXTRACTOR_VERSION, type Extractor } from "@cma/extraction";
-import { compareSnapshots, type PriorSnapshotData } from "@cma/detection";
+import { compareSnapshots, type PriorSnapshotData, type RecentChangeEvent } from "@cma/detection";
 import * as db from "@cma/db";
 import type { MonitoringJobPayload } from "@cma/queue";
 
@@ -63,6 +63,8 @@ interface PriorSnapshotLike {
  * @cma/extraction implementations.
  */
 export interface PipelineDeps {
+  /** Changes recorded for this URL recently, to recognise a value that flips back (Phase 29 C4). */
+  listRecentChangeEventsForUrl: (organizationId: string, monitoredUrlId: string, sinceMs: number) => Promise<RecentChangeEvent[]>;
   persistNotModifiedResult: (
     jobId: string,
     input: {
@@ -100,6 +102,7 @@ export function createDefaultPipelineDeps(): PipelineDeps {
     markMonitoringJobRunning: db.markMonitoringJobRunning,
     markMonitoringJobFailed: db.markMonitoringJobFailed,
     persistMonitoringResult: db.persistMonitoringResult,
+    listRecentChangeEventsForUrl: (organizationId, monitoredUrlId, sinceMs) => db.listRecentChangeEventsForUrl(organizationId, monitoredUrlId, sinceMs),
     persistNotModifiedResult: db.persistNotModifiedResult,
   };
 }
@@ -185,15 +188,28 @@ export async function runMonitoringJob(
       return { monitoringJobId: job.id, verificationState: "NO_CHANGE", changeEventCount: 0 };
     }
 
-    const comparison = compareSnapshots(prior, {
+    // Only worth a query when there is something to compare against and a price might have moved.
+    const recentEvents = prior
+      ? await deps
+          .listRecentChangeEventsForUrl(monitoredUrl.organizationId, monitoredUrl.id, 48 * 60 * 60_000)
+          // The history only refines severity; a failure to read it must never stop the scan.
+          .catch(() => [] as RecentChangeEvent[])
+      : [];
+
+    const comparison = compareSnapshots(
+      prior,
+      {
       extractorVersion: extraction.extractorVersion,
+      confidence: extraction.confidence,
       httpStatus: extraction.httpStatus,
       errorMessage: extraction.errorMessage,
       contentHash: extraction.contentHash,
       structuredDataHash: extraction.structuredDataHash,
       normalizedContent: extraction.normalizedContent,
       entities: extraction.extractedEntities,
-    });
+      },
+      { recentEvents },
+    );
 
     await deps.persistMonitoringResult(job.id, {
       organizationId: monitoredUrl.organizationId,
