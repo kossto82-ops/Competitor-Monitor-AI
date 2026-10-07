@@ -1,16 +1,21 @@
-import { listDueMonitoredUrls } from "@cma/db";
+import { hostOfUrl, listDueMonitoredUrls } from "@cma/db";
 import { createMonitoringQueue, monitoringJobId, type MonitoringJobPayload } from "@cma/queue";
 import type { Queue } from "bullmq";
 import { pathToFileURL } from "node:url";
+import { planHostDelays, readHostSpacingFromEnv, type HostSpacingOptions } from "./hostSpacing.js";
 
 interface DueMonitoredUrlLike {
   id: string;
   organizationId: string;
+  /** Used only to space out jobs that hit the same host; a missing url means "no spacing". */
+  url?: string;
 }
 
 export interface EnqueueAllDeps {
   listDueMonitoredUrls: () => Promise<DueMonitoredUrlLike[]>;
   createMonitoringQueue: () => Pick<Queue<MonitoringJobPayload>, "add" | "close">;
+  /** Defaults to CMA_SCHEDULER_HOST_SPACING_MS / CMA_SCHEDULER_HOST_JITTER_MS. */
+  hostSpacing?: HostSpacingOptions;
 }
 
 export function createDefaultEnqueueAllDeps(): EnqueueAllDeps {
@@ -44,13 +49,20 @@ export async function enqueueDueMonitoringJobs(deps: EnqueueAllDeps = createDefa
   const urls = await deps.listDueMonitoredUrls();
   const queue = deps.createMonitoringQueue();
 
+  const delays = planHostDelays(
+    urls.map((u) => ({ url: u.url ?? "" })),
+    hostOfUrl,
+    deps.hostSpacing ?? readHostSpacingFromEnv(),
+  );
+
   let enqueuedCount = 0;
   try {
-    for (const url of urls) {
+    for (const [index, url] of urls.entries()) {
+      const delay = delays[index] ?? 0;
       await queue.add(
         "monitor",
         { organizationId: url.organizationId, monitoredUrlId: url.id },
-        { jobId: monitoringJobId(url.id) },
+        { jobId: monitoringJobId(url.id), ...(delay > 0 ? { delay } : {}) },
       );
       enqueuedCount += 1;
     }

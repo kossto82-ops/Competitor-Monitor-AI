@@ -126,6 +126,13 @@ Cada parte: rama o commit propio, tests en verde, y pausa para revisión antes d
 Scheduler de producción con frecuencia por fuente, límite por host y jitter, backoff relativo a la frecuencia configurada, estados `STALE`/`DISABLED`, requests condicionales (`ETag`/`If-Modified-Since`), robots.txt, límite de tamaño/content-type en extracción, sweeper de filas `RUNNING`, panel de salud de fuentes y alerta de fuente caída. Errores: E14, E24, E30, parte de E26.
 Tests: corpus de comportamientos reales (403, 429, redirecciones), resiliencia (Redis/worker caídos).
 
+| Parte | Contenido | Errores |
+|---|---|---|
+| B1 ✅ | Hecho: el backoff de fallos es relativo a `scanFrequencyMinutes` (`monitoringBackoffMs(n, frecuencia)`: suelo = min(frecuencia/4, 6 h), tope = max(24 h, frecuencia); una URL diaria ya no se reintenta a los 15 min). Espaciado por host: las URLs del mismo sitio que vencen en el mismo tick se encolan con `delay` creciente (`CMA_SCHEDULER_HOST_SPACING_MS`, 30 s) más jitter (`CMA_SCHEDULER_HOST_JITTER_MS`, 10 s), máximo 10 min; hosts distintos no se retrasan entre sí. **Límite:** el espaciado actúa dentro de un tick; no hay límite global de peticiones por host entre ticks ni entre ejecuciones manuales | E14 (parcial) |
+| B2 | Estados de salud de la fuente (`HEALTHY/DEGRADED/STALE/DISABLED`) derivados de fallos y antigüedad, migración, desactivación automática tras N días sin éxito, aviso al cliente | E14 |
+| B3 | Endurecer la extracción: límite de tamaño y content-type antes de parsear, `ETag`/`If-Modified-Since`, robots.txt | E30, E26 (parcial) |
+| B4 | Sweeper de filas de IA en `RUNNING` huérfanas, panel de salud de fuentes y alerta de fuente caída | E24 |
+
 ### Fase C — Calidad de detección (3-4 semanas)
 
 Extractor determinista de tarjetas/tablas de precio, parser de moneda y locale, normalización por regiones (main, sin nav/footer/banners), evidencia por bloque cambiado, supresión de oscilaciones, snapshot poco fiable → `FAILED_TO_VERIFY`, identidad interna por competidor (renombrado detectado con confianza), confianza y severidad derivadas, unicidad en `ChangeEvent`, `organizationId` en `ExtractedEntity`. Errores: E5-E13, E25, E26, E37.

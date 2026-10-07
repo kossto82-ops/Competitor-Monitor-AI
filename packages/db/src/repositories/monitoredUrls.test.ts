@@ -165,14 +165,30 @@ describe.skipIf(!reachable)("monitoredUrls repository (Phase 5)", () => {
     it("includes a URL whose last attempt is older than its backoff window", async () => {
       const { organization, competitor } = await makeOrgWithCompetitor("due-backoff-mature");
       const url = await createMonitoredUrl(organization.id, competitor.id, { url: "https://due-backoff-mature.example.test/pricing", category: "GENERAL" });
-      // Two consecutive failures 40 minutes ago -> backoff 30m -> due again.
+      // Hourly URL, two consecutive failures 40 minutes ago -> backoff 30m -> due again.
       await prisma.monitoredUrl.update({
         where: { id: url.id },
-        data: { lastAttemptAt: new Date(Date.now() - 40 * 60_000), consecutiveFailureCount: 2 },
+        data: { lastAttemptAt: new Date(Date.now() - 40 * 60_000), consecutiveFailureCount: 2, scanFrequencyMinutes: 60 },
       });
 
       const due = await listDueMonitoredUrls();
       expect(due.map((u) => u.id)).toContain(url.id);
+    });
+
+    it("does not retry a daily URL after one failure sooner than a quarter of its cadence (capped at 6h)", async () => {
+      const { organization, competitor } = await makeOrgWithCompetitor("due-backoff-daily");
+      const url = await createMonitoredUrl(organization.id, competitor.id, { url: "https://due-backoff-daily.example.test/pricing", category: "GENERAL" });
+      await prisma.monitoredUrl.update({
+        where: { id: url.id },
+        data: { lastAttemptAt: new Date(Date.now() - 60 * 60_000), consecutiveFailureCount: 1, scanFrequencyMinutes: 1440 },
+      });
+      expect((await listDueMonitoredUrls()).map((u) => u.id)).not.toContain(url.id);
+
+      await prisma.monitoredUrl.update({
+        where: { id: url.id },
+        data: { lastAttemptAt: new Date(Date.now() - 7 * 60 * 60_000) },
+      });
+      expect((await listDueMonitoredUrls()).map((u) => u.id)).toContain(url.id);
     });
 
     it("caps backoff at 24 hours for a permanently-failing URL (high consecutiveFailureCount)", async () => {
@@ -211,6 +227,20 @@ describe.skipIf(!reachable)("monitoredUrls repository (Phase 5)", () => {
 
     it("caps at 24 hours", async () => {
       expect(monitoringBackoffMs(41)).toBe(24 * 60 * 60_000);
+    });
+
+    it("is relative to the configured cadence when one is given", async () => {
+      // 15-minute cadence: unchanged, the plain exponential applies.
+      expect(monitoringBackoffMs(1, 15)).toBe(15 * 60_000 * 1);
+      // Daily cadence: floor is min(cadence/4, 6h) = 6h.
+      expect(monitoringBackoffMs(1, 1440)).toBe(6 * 60 * 60_000);
+      // Hourly cadence: floor is 15m, so the first failures follow the exponential.
+      expect(monitoringBackoffMs(1, 60)).toBe(15 * 60_000);
+      expect(monitoringBackoffMs(3, 60)).toBe(60 * 60_000);
+      // Weekly cadence: the cap rises to the cadence instead of staying at 24h.
+      expect(monitoringBackoffMs(41, 7 * 1440)).toBe(7 * 24 * 60 * 60_000);
+      // Still 24h for a daily cadence.
+      expect(monitoringBackoffMs(41, 1440)).toBe(24 * 60 * 60_000);
     });
   });
 });

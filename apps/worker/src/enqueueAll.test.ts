@@ -30,6 +30,25 @@ describe("enqueueDueMonitoringJobs", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("delays the second and later jobs for the same host, but not other hosts", async () => {
+    const add = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      listDueMonitoredUrls: vi.fn().mockResolvedValue([
+        { id: "u1", organizationId: "o", url: "https://rival.test/pricing" },
+        { id: "u2", organizationId: "o", url: "https://rival.test/plans" },
+        { id: "u3", organizationId: "o", url: "https://other.test/pricing" },
+      ]),
+      createMonitoringQueue: () => ({ add, close: vi.fn().mockResolvedValue(undefined) }),
+      hostSpacing: { spacingMs: 30_000, jitterMs: 0 },
+    });
+
+    await enqueueDueMonitoringJobs(deps);
+
+    expect(add.mock.calls[0]?.[2]).not.toHaveProperty("delay");
+    expect(add.mock.calls[1]?.[2]).toMatchObject({ delay: 30_000 });
+    expect(add.mock.calls[2]?.[2]).not.toHaveProperty("delay");
+  });
+
   it("reports zero enqueued when nothing is due, without touching the queue", async () => {
     const deps = makeDeps();
     const result = await enqueueDueMonitoringJobs(deps);

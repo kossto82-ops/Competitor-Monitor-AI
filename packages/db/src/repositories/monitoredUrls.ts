@@ -77,7 +77,7 @@ export async function listDueMonitoredUrls(now: Date = new Date()) {
   });
   return urls.filter((url) => {
     if (!url.lastSuccessfulScanAt && !url.lastAttemptAt) return true;
-    const backoffMs = monitoringBackoffMs(url.consecutiveFailureCount);
+    const backoffMs = monitoringBackoffMs(url.consecutiveFailureCount, url.scanFrequencyMinutes);
     const sinceLastAttempt = url.lastAttemptAt ? url.lastAttemptAt.getTime() : 0;
     const attemptedRecently = sinceLastAttempt > 0 && now.getTime() - sinceLastAttempt < backoffMs;
     if (attemptedRecently) {
@@ -96,12 +96,30 @@ export async function listDueMonitoredUrls(now: Date = new Date()) {
  * on the immediate next tick exactly as before - backoff only kicks in
  * once a URL is *repeatedly* failing.
  */
-export function monitoringBackoffMs(consecutiveFailureCount: number): number {
+export function monitoringBackoffMs(consecutiveFailureCount: number, scanFrequencyMinutes?: number): number {
   if (consecutiveFailureCount <= 0) return 0;
   const BASE_MS = 15 * 60_000; // one scheduler tick
-  const MAX_MS = 24 * 60 * 60_000; // 24h cap
   const exponent = Math.min(consecutiveFailureCount - 1, 10);
-  return Math.min(BASE_MS * 2 ** exponent, MAX_MS);
+  const exponential = BASE_MS * 2 ** exponent;
+  if (!scanFrequencyMinutes || scanFrequencyMinutes <= 0) return Math.min(exponential, 24 * 60 * 60_000);
+
+  // Phase 29 B1: relative to the URL's own cadence. A daily URL that fails once used to be retried
+  // after 15 minutes - ninety-six times more often than the customer asked. Now the retry waits at
+  // least a quarter of the cadence (at most 6h, so a transient error still recovers within the day),
+  // and the cap never drops below the cadence itself (a weekly URL is not hammered daily forever).
+  const frequencyMs = scanFrequencyMinutes * 60_000;
+  const floorMs = Math.min(frequencyMs / 4, 6 * 60 * 60_000);
+  const capMs = Math.max(24 * 60 * 60_000, frequencyMs);
+  return Math.min(Math.max(exponential, floorMs), capMs);
+}
+
+/** Hostname used to space out requests to the same site; null when the URL cannot be parsed. */
+export function hostOfUrl(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 /** Phase 5 (Section 4): editing an existing monitored URL - label, category, frequency, and pause/resume (`isActive`). */

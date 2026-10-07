@@ -115,8 +115,12 @@ npm run worker:enqueue                       # enqueue every URL that is due
 curl -X POST http://localhost:3000/api/monitored-urls/<urlId>/scan -b cookies.txt
 ```
 
-**Failure backoff (Phase 28.1).** A URL that keeps failing is not retried every tick: the wait doubles
-from 15 minutes up to 24 hours (`monitoringBackoffMs`) and resets on the first success. See
+**Failure backoff (Phase 28.1, relative to the cadence since Phase 29 B1).** A URL that keeps failing is
+not retried every tick: the wait doubles from 15 minutes up to 24 hours (`monitoringBackoffMs`) and resets
+on the first success. It is relative to the URL's own `scanFrequencyMinutes`: the first retry waits at
+least a quarter of the cadence (at most 6 h), and the cap is never below the cadence. **Same-host spacing:**
+URLs of one site that are due on the same tick are enqueued 30 s apart plus up to 10 s of jitter
+(`CMA_SCHEDULER_HOST_SPACING_MS` / `CMA_SCHEDULER_HOST_JITTER_MS`). See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 
