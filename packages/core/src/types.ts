@@ -42,6 +42,12 @@ export interface ExtractionResult {
    * byte-for-byte what we already hold. No content is extracted and no snapshot should be written.
    */
   notModified?: boolean;
+  /**
+   * Phase 29 C2: version of the extraction logic that produced `normalizedContent` and the hashes.
+   * Two snapshots with different versions are not comparable (the logic decides WHAT text is hashed),
+   * so the detector treats a version change as a new baseline instead of as a page change.
+   */
+  extractorVersion?: number;
   /** Cache validators of a successful full response, stored so the next scan can be conditional. */
   validators?: ConditionalValidators;
 }

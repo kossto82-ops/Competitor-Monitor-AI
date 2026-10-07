@@ -20,6 +20,92 @@ export function extractVisibleText($: cheerio.CheerioAPI): string {
   return normalizeWhitespace($body.text());
 }
 
+/**
+ * Phase 29 C2: version of the content-extraction logic (which text is hashed and diffed). Bump it
+ * whenever extractMainContent / its noise rules change in a way that alters the text of an unchanged
+ * page - the detector then re-baselines instead of reporting every monitored page as changed.
+ *   1 = whole <body> text (Phases 1-29 B)
+ *   2 = main content region with page chrome and volatile text removed
+ */
+export const EXTRACTOR_VERSION = 2;
+
+// Page chrome that is not the page's own content. Removed everywhere in the document.
+const ALWAYS_NOISE = "nav, [role='navigation'], [role='banner'], [role='contentinfo'], [role='dialog'], [role='alertdialog'], [role='search']";
+// Removed only when NOT inside the page's content: a <header> / <footer> / <aside> inside <main>,
+// <article> or <section> belongs to that content (a pricing hero is often a <header>).
+const CHROME_OUTSIDE_CONTENT = "header, footer, aside";
+const CONTENT_CONTAINERS = "main, article, section, [role='main']";
+// Cookie/consent banners, pop-ups, chat widgets: identified by what they call themselves.
+const NOISE_NAME = /(?:^|[\s_-])(?:cookie|cookies|consent|gdpr|ccpa|popup|pop-up|modal|newsletter-signup|livechat|live-chat|intercom|drift|crisp|zendesk|hubspot-messages|skip-link|breadcrumbs?)(?:$|[\s_-])/i;
+
+// Text that changes on every load without the page meaning anything different.
+const VOLATILE_PATTERNS: [RegExp, string][] = [
+  [/\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b/g, "[time]"],
+  [/\b(?:an?|\d+)\s+(?:second|minute|hour|day|week)s?\s+ago\b/gi, "[time]"],
+  [/\b(?:updated|last updated|as of)\s+(?:today|just now|yesterday)\b/gi, "[time]"],
+  [/(?:©|\(c\)|copyright)\s*(?:19|20)\d{2}(?:\s*[-–]\s*(?:19|20)\d{2})?/gi, "[copyright]"],
+];
+
+export function scrubVolatileText(text: string): string {
+  let out = text;
+  for (const [pattern, replacement] of VOLATILE_PATTERNS) out = out.replace(pattern, replacement);
+  return normalizeWhitespace(out);
+}
+
+export interface MainContent {
+  text: string;
+  strategy: "main" | "body" | "whole-body";
+}
+
+/**
+ * The text that represents the page itself, for hashing and diffing: the <main> region when the
+ * page has a substantial one, otherwise the whole body - in both cases with navigation, site
+ * header/footer, sidebars, cookie banners, pop-ups and chat widgets removed and volatile text
+ * (timestamps, "3 hours ago", copyright years) neutralized. Before this, the whole body text was
+ * hashed, so a rotating banner or a footer year change reported the page as changed.
+ *
+ * Deliberately conservative: a false negative (hiding something that mattered) is worse than a
+ * little noise, so header/footer/aside are only dropped when they sit outside the page's content
+ * containers, and <main> is only trusted when it holds a meaningful share of the page.
+ */
+export function extractMainContent($: cheerio.CheerioAPI): MainContent {
+  const chosen = extractCleanedContent($);
+  // Safety net against over-removal: when almost nothing is left but the page clearly has text, the
+  // real content probably sits inside what we treat as chrome (a link portal, an unusual layout).
+  // Hashing a handful of characters would blind us to changes, so use the whole body instead.
+  if (chosen.text.length < MIN_USEFUL_CONTENT_CHARS) {
+    const whole = scrubVolatileText(extractVisibleText($));
+    if (whole.length >= MIN_WHOLE_BODY_CHARS_FOR_FALLBACK) return { text: whole, strategy: "whole-body" };
+  }
+  return chosen;
+}
+
+const MIN_USEFUL_CONTENT_CHARS = 100;
+const MIN_WHOLE_BODY_CHARS_FOR_FALLBACK = 400;
+
+function extractCleanedContent($: cheerio.CheerioAPI): MainContent {
+  const $body = $("body").clone();
+  $body.find("script, style, noscript, svg, template, iframe").remove();
+  $body.find(ALWAYS_NOISE).remove();
+  $body.find(CHROME_OUTSIDE_CONTENT).each((_, el) => {
+    if ($(el).closest(CONTENT_CONTAINERS).length === 0) $(el).remove();
+  });
+  $body.find("[class], [id]").each((_, el) => {
+    const name = `${$(el).attr("class") ?? ""} ${$(el).attr("id") ?? ""}`;
+    if (NOISE_NAME.test(name)) $(el).remove();
+  });
+
+  const bodyText = scrubVolatileText($body.text());
+  const $main = $body.find("main, [role='main']").first();
+  if ($main.length > 0) {
+    const mainText = scrubVolatileText($main.text());
+    if (mainText.length >= 200 || (bodyText.length > 0 && mainText.length >= bodyText.length * 0.5)) {
+      return { text: mainText, strategy: "main" };
+    }
+  }
+  return { text: bodyText, strategy: "body" };
+}
+
 const CURRENCY_SYMBOLS: Record<string, string> = {
   "€": "EUR",
   "$": "USD",

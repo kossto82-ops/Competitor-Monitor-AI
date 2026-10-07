@@ -143,7 +143,14 @@ from the last verified fetch; a `304 Not Modified` counts as a successful scan b
 monitored page with its state and the reason, most urgent first. The daily report email adds a "Sources
 needing attention" section for stopped and stale sources of active competitors. On every monitoring tick the
 scheduler also fails jobs whose worker died (RUNNING for over 15 minutes, PENDING for over 2 hours) so a
-killed worker can no longer block the Refresh button or the scan-status poller. See
+killed worker can no longer block the Refresh button or the scan-status poller.
+
+**Content regions and extractor versions (Phase 29 C2).** What is hashed and compared for a page is its main
+content region, without navigation, site header/footer, cookie banners, pop-ups, chat widgets or volatile text
+(timestamps, "3 hours ago", copyright years). Whenever those rules change, bump `EXTRACTOR_VERSION`
+(`packages/extraction/src/structuredData.ts`): the next scan of every URL is then recorded as a new baseline
+with no change events, instead of reporting every page as changed. Expect exactly one such quiet scan per URL
+after deploying a version bump. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 

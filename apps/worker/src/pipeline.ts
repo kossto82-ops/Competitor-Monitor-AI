@@ -1,5 +1,5 @@
 import type { ExtractedEntity, ExtractionResult, ComparisonResult } from "@cma/core";
-import { CheerioExtractor, createRobotsCheckerFromEnv, defaultFetch, type Extractor } from "@cma/extraction";
+import { CheerioExtractor, createRobotsCheckerFromEnv, defaultFetch, EXTRACTOR_VERSION, type Extractor } from "@cma/extraction";
 import { compareSnapshots, type PriorSnapshotData } from "@cma/detection";
 import * as db from "@cma/db";
 import type { MonitoringJobPayload } from "@cma/queue";
@@ -40,6 +40,8 @@ export function conditionalMaxAgeMs(): number {
 
 interface PriorSnapshotLike {
   id: string;
+  /** Missing on rows from before Phase 29 C2; those were produced by version 1. */
+  extractorVersion?: number;
   contentHash: string | null;
   structuredDataHash: string | null;
   normalizedContent: string;
@@ -147,6 +149,7 @@ export async function runMonitoringJob(
     const priorSnapshot = await deps.getLatestVerifiedSnapshot(monitoredUrl.id);
     const prior: PriorSnapshotData | null = priorSnapshot
       ? {
+          extractorVersion: priorSnapshot.extractorVersion ?? 1,
           contentHash: priorSnapshot.contentHash,
           structuredDataHash: priorSnapshot.structuredDataHash,
           normalizedContent: priorSnapshot.normalizedContent,
@@ -160,7 +163,12 @@ export async function runMonitoringJob(
     const validatorsFresh =
       monitoredUrl.validatorsSetAt != null && Date.now() - monitoredUrl.validatorsSetAt.getTime() < conditionalMaxAgeMs();
     const useConditional =
-      !payload.monitoringJobId && priorSnapshot != null && validatorsFresh && Boolean(monitoredUrl.etag || monitoredUrl.lastModifiedHeader);
+      !payload.monitoringJobId &&
+      priorSnapshot != null &&
+      // A 304 writes no snapshot, so it must never answer for a snapshot from an older extractor: the
+      // new baseline has to be taken with a full fetch first.
+      (priorSnapshot.extractorVersion ?? 1) === EXTRACTOR_VERSION &&
+      validatorsFresh && Boolean(monitoredUrl.etag || monitoredUrl.lastModifiedHeader);
 
     const extraction = await deps.extractor.extract({
       url: monitoredUrl.url,
@@ -178,6 +186,7 @@ export async function runMonitoringJob(
     }
 
     const comparison = compareSnapshots(prior, {
+      extractorVersion: extraction.extractorVersion,
       httpStatus: extraction.httpStatus,
       errorMessage: extraction.errorMessage,
       contentHash: extraction.contentHash,

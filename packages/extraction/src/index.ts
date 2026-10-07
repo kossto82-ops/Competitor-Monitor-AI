@@ -5,6 +5,9 @@ export { sha256 } from "./hash.js";
 export {
   normalizeWhitespace,
   extractVisibleText,
+  extractMainContent,
+  scrubVolatileText,
+  EXTRACTOR_VERSION,
   extractJsonLdEntities,
   extractGenericPriceEntities,
   looksLikeJsShell,

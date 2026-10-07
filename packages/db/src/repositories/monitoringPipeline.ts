@@ -95,6 +95,7 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
         structuredDataHash: extraction.structuredDataHash,
         confidence: extraction.confidence,
         warnings: extraction.warnings,
+        extractorVersion: extraction.extractorVersion ?? 1,
         extractedEntities: {
           create: extraction.extractedEntities.map((entity) => ({
             type: entity.type,

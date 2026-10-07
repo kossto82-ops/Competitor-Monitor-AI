@@ -343,4 +343,38 @@ describe("compareSnapshots - promotion added/changed/removed", () => {
       expect(event.percentageChange).toBeNull();
     });
   });
+
+  describe("extractor version (Phase 29 C2)", () => {
+    it("treats a scan under a different extractor version as the new baseline, not as a change", () => {
+      const prior = makePrior({ extractorVersion: 1, contentHash: "old-whole-body-hash", entities: [priceEntity({ value: "49.00" })] });
+      const current = makeCurrent({
+        extractorVersion: 2,
+        contentHash: "new-main-region-hash",
+        structuredDataHash: "struct-b",
+        entities: [priceEntity({ value: "39.00" })],
+      });
+      const result = compareSnapshots(prior, current);
+      expect(result.verificationState).toBe("NO_CHANGE");
+      expect(result.changeEvents).toEqual([]);
+      expect(result.reason).toContain("new baseline");
+    });
+
+    it("compares normally when both snapshots come from the same version", () => {
+      const prior = makePrior({ extractorVersion: 2, entities: [priceEntity({ value: "49.00" })] });
+      const current = makeCurrent({ extractorVersion: 2, contentHash: "hash-b", structuredDataHash: "struct-b", entities: [priceEntity({ value: "39.00" })] });
+      expect(compareSnapshots(prior, current).changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(true);
+    });
+
+    it("compares normally when a version is not known (older callers)", () => {
+      const prior = makePrior({ entities: [priceEntity({ value: "49.00" })] });
+      const current = makeCurrent({ extractorVersion: 2, contentHash: "hash-b", structuredDataHash: "struct-b", entities: [priceEntity({ value: "39.00" })] });
+      expect(compareSnapshots(prior, current).changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(true);
+    });
+
+    it("still reports a failed extraction as FAILED_TO_VERIFY across versions", () => {
+      const prior = makePrior({ extractorVersion: 1 });
+      const current = makeCurrent({ extractorVersion: 2, errorMessage: "HTTP 403" });
+      expect(compareSnapshots(prior, current).verificationState).toBe("FAILED_TO_VERIFY");
+    });
+  });
 });

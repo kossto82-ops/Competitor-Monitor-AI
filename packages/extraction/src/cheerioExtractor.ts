@@ -4,7 +4,9 @@ import { sha256 } from "./hash.js";
 import { defaultFetch } from "./defaultFetch.js";
 import {
   extractGenericPriceEntities,
+  EXTRACTOR_VERSION,
   extractJsonLdEntities,
+  extractMainContent,
   extractVisibleText,
   looksLikeJsShell,
 } from "./structuredData.js";
@@ -65,7 +67,10 @@ export class CheerioExtractor implements Extractor {
       }
 
       const $ = cheerio.load(page.body);
-      const visibleText = extractVisibleText($);
+      // Phase 29 C2: the page's own content (no nav/footer/banners/volatile text) is what gets
+      // hashed and diffed; the JS-shell heuristic still looks at the whole body, as before.
+      const visibleText = extractMainContent($).text;
+      const wholeBodyText = extractVisibleText($);
       const jsonLdEntities = extractJsonLdEntities($);
       const baseEntities: ExtractedEntity[] =
         jsonLdEntities.length > 0 ? jsonLdEntities : extractGenericPriceEntities(visibleText);
@@ -79,7 +84,7 @@ export class CheerioExtractor implements Extractor {
       const warnings: string[] = [];
       let confidence = 1;
 
-      if (looksLikeJsShell($, visibleText)) {
+      if (looksLikeJsShell($, wholeBodyText)) {
         warnings.push(
           "Page looks like a client-rendered application shell; HTTP+Cheerio extraction may be incomplete. Consider a Playwright-based extractor for this URL.",
         );
@@ -108,6 +113,7 @@ export class CheerioExtractor implements Extractor {
         confidence,
         warnings,
         durationMs,
+        extractorVersion: EXTRACTOR_VERSION,
         ...(page.headers && (page.headers.etag || page.headers.lastModified) ? { validators: page.headers } : {}),
       };
     } catch (err) {
@@ -141,6 +147,7 @@ export class CheerioExtractor implements Extractor {
       confidence: 0,
       warnings: [],
       durationMs,
+      extractorVersion: EXTRACTOR_VERSION,
     };
   }
 }

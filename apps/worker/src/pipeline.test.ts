@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExtractionResult } from "@cma/core";
+import { EXTRACTOR_VERSION } from "@cma/extraction";
 import { runMonitoringJob, type PipelineDeps } from "./pipeline.js";
 
 function extractionResult(overrides: Partial<ExtractionResult> = {}): ExtractionResult {
@@ -208,6 +209,7 @@ describe("runMonitoringJob", () => {
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
     const priorSnapshot = {
       id: "snap-1",
+      extractorVersion: EXTRACTOR_VERSION,
       contentHash: "hash-current",
       structuredDataHash: "struct-current",
       normalizedContent: "Pro Plan 39 EUR",
@@ -253,6 +255,18 @@ describe("runMonitoringJob", () => {
     it("always does a full fetch for a manual scan (the payload carries a job id)", async () => {
       const { deps, extract } = conditionalDeps(withValidators());
       await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1", monitoringJobId: "pending-job-1" }, deps);
+      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
+    });
+
+    it("does a full fetch when the verified snapshot came from an older extractor, so the new baseline is taken first", async () => {
+      const { deps, extract } = conditionalDeps(withValidators(), {}, { ...priorSnapshot, extractorVersion: 1 });
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
+    });
+
+    it("treats a snapshot with no recorded version as version 1 (it predates the column)", async () => {
+      const { deps, extract } = conditionalDeps(withValidators(), {}, { ...priorSnapshot, extractorVersion: undefined });
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
       expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
     });
 

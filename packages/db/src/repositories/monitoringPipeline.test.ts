@@ -84,6 +84,30 @@ describe.skipIf(!reachable)("monitoring pipeline persistence (Phase 29 B3b)", ()
     expect(row.validatorsSetAt).not.toBeNull();
   });
 
+  it("records the extractor version on the snapshot, defaulting to 1 for callers that do not send one", async () => {
+    const { organization, url } = await makeUrl();
+    const job = await createRunningMonitoringJob(organization.id, url.id);
+    await persistMonitoringResult(job.id, {
+      organizationId: organization.id,
+      monitoredUrlId: url.id,
+      previousSnapshotId: null,
+      extraction: extraction({ extractorVersion: 2 }),
+      comparison: comparison("NO_CHANGE"),
+      usage,
+    });
+    const job2 = await createRunningMonitoringJob(organization.id, url.id);
+    await persistMonitoringResult(job2.id, {
+      organizationId: organization.id,
+      monitoredUrlId: url.id,
+      previousSnapshotId: null,
+      extraction: extraction(),
+      comparison: comparison("NO_CHANGE"),
+      usage,
+    });
+    const rows = await prisma.snapshot.findMany({ where: { monitoredUrlId: url.id }, orderBy: { fetchedAt: "asc" } });
+    expect(rows.map((x) => x.extractorVersion)).toEqual([2, 1]);
+  });
+
   it("clears the validators after a failed scan, so the next scan is a full fetch", async () => {
     const { organization, url } = await makeUrl();
     await prisma.monitoredUrl.update({ where: { id: url.id }, data: { etag: '"old"', validatorsSetAt: new Date() } });

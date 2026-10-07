@@ -1,6 +1,8 @@
 import { comparePrices, type ChangeEventDraft, type ComparisonResult, type ExtractedEntity, type Severity } from "@cma/core";
 
 export interface PriorSnapshotData {
+  /** Version of the extraction logic that produced this snapshot (Phase 29 C2); absent = unknown, assumed comparable. */
+  extractorVersion?: number;
   contentHash: string | null;
   structuredDataHash: string | null;
   normalizedContent: string;
@@ -8,6 +10,7 @@ export interface PriorSnapshotData {
 }
 
 export interface CurrentExtractionData {
+  extractorVersion?: number;
   httpStatus: number | null;
   errorMessage: string | null;
   contentHash: string | null;
@@ -31,6 +34,16 @@ export function compareSnapshots(prior: PriorSnapshotData | null, current: Curre
 
   if (prior === null) {
     return { verificationState: "NO_CHANGE", reason: "No prior snapshot exists - this is the baseline.", changeEvents: [] };
+  }
+
+  // The extraction logic decides WHICH text is hashed. A snapshot taken under another version is not
+  // comparable: report it as the new baseline rather than as every page having changed at once.
+  if (prior.extractorVersion !== undefined && current.extractorVersion !== undefined && prior.extractorVersion !== current.extractorVersion) {
+    return {
+      verificationState: "NO_CHANGE",
+      reason: `Extraction logic changed (v${prior.extractorVersion} -> v${current.extractorVersion}); this scan is the new baseline, not a page change.`,
+      changeEvents: [],
+    };
   }
 
   const identical = current.contentHash === prior.contentHash && current.structuredDataHash === prior.structuredDataHash;

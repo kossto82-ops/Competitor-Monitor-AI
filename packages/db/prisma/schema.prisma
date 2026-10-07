@@ -294,6 +294,9 @@ model Snapshot {
   structuredDataHash String?
   confidence         Float
   warnings           Json    @default("[]")
+  // Phase 29 C2: version of the extraction logic that produced the text/hashes above. Rows from
+  // before this column were produced by version 1 (whole-body text).
+  extractorVersion   Int     @default(1)
 
   extractedEntities      ExtractedEntity[]
   changeEventsAsCurrent  ChangeEvent[]     @relation("CurrentSnapshot")
