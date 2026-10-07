@@ -379,11 +379,28 @@ function plansFromTable($: cheerio.CheerioAPI, table: AnyNode): PlanPrice[] {
   return out.length >= 2 ? out : [];
 }
 
-export function planToEntity(plan: PlanPrice): ExtractedEntity {
+/**
+ * Entities for every plan of a page. A plan's identity is its NAME: `plan:{name}`. The billing period only
+ * joins the key (`plan:{name}:month`, `plan:{name}:year`, `:na`) when the same page lists the same plan
+ * more than once with different periods (a monthly/annual pair), because then the name alone would collide.
+ * Replaying real archived history showed why: the period wording appears or disappears between captures of
+ * one page, and a key that included it turned every such edit into a removed plan plus an added plan.
+ */
+export function plansToEntities(plans: PlanPrice[]): ExtractedEntity[] {
+  const periodsByName = new Map<string, Set<string>>();
+  for (const plan of plans) {
+    const set = periodsByName.get(slug(plan.name)) ?? new Set<string>();
+    set.add(plan.period ?? "na");
+    periodsByName.set(slug(plan.name), set);
+  }
+  return plans.map((plan) => planToEntity(plan, (periodsByName.get(slug(plan.name))?.size ?? 1) > 1));
+}
+
+export function planToEntity(plan: PlanPrice, includePeriodInKey = true): ExtractedEntity {
   const period = plan.period ? ` (per ${plan.period})` : "";
   return {
     type: "PRICE",
-    key: `plan:${slug(plan.name)}:${plan.period ?? "na"}`,
+    key: includePeriodInKey ? `plan:${slug(plan.name)}:${plan.period ?? "na"}` : `plan:${slug(plan.name)}`,
     label: `${plan.name}${period}`,
     value: plan.amount.toFixed(2),
     currency: plan.currency,

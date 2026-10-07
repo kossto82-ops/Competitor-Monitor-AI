@@ -39,12 +39,12 @@ describe("plan price detection without JSON-LD (Phase 29 C3)", () => {
     const before = await scan(page([card("Starter", "$9"), card("Pro", "$29"), card("Business", "$99")]));
     const after = await scan(page([card("Starter", "$9"), card("Pro", "$39"), card("Business", "$99")]));
 
-    expect(before.extractedEntities.map((e) => e.key)).toEqual(["plan:starter:month", "plan:pro:month", "plan:business:month"]);
+    expect(before.extractedEntities.map((e) => e.key)).toEqual(["plan:starter", "plan:pro", "plan:business"]);
 
     const result = compareSnapshots(asPrior(before), asCurrent(after));
     const events = result.changeEvents.filter((e) => e.changeType === "PRICE_CHANGE");
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ entityKey: "plan:pro:month", oldValue: "29.00", newValue: "39.00", currency: "USD", percentageChange: 34.48 });
+    expect(events[0]).toMatchObject({ entityKey: "plan:pro", oldValue: "29.00", newValue: "39.00", currency: "USD", percentageChange: 34.48 });
     expect(events[0]!.evidenceExcerpt).toContain("Pro (per month)");
     // The page text changed too, but the entity event explains it - not a vague content change as the only signal.
     expect(result.changeEvents.some((e) => e.changeType === "PRODUCT_ADDED" || e.changeType === "PRODUCT_REMOVED")).toBe(false);
@@ -54,8 +54,8 @@ describe("plan price detection without JSON-LD (Phase 29 C3)", () => {
     const before = await scan(page([card("Starter", "$9"), card("Pro", "$29")]));
     const after = await scan(page([card("Pro", "$29"), card("Team", "$59")]));
     const types = compareSnapshots(asPrior(before), asCurrent(after)).changeEvents.map((e) => `${e.changeType}:${e.entityKey}`);
-    expect(types).toContain("PRODUCT_ADDED:plan:team:month");
-    expect(types).toContain("PRODUCT_REMOVED:plan:starter:month");
+    expect(types).toContain("PRODUCT_ADDED:plan:team");
+    expect(types).toContain("PRODUCT_REMOVED:plan:starter");
   });
 
   it("is not fooled by a re-ordering of the cards or by a new banner and footer year", async () => {

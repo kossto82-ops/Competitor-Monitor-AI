@@ -181,6 +181,21 @@ El monitor ahora pide cada página en el **mercado** que elige la organización 
 - **Comprobado con webs reales:** mozilla.org sigue el idioma pedido (sin preferencia -> `/`, `es-ES` -> `/es-ES/`, `de-DE` -> `/de/`). **zoho.com no lo hace:** responde con rupias y las mismas páginas cualquiera que sea el idioma, porque decide la moneda por la dirección IP del servidor.
 - **Límite que no se puede resolver con una cabecera y la interfaz lo dice:** el idioma no fija el **país**. Para ver los precios de un país concreto en sitios que deciden por IP haría falta salir a internet desde ese país (un proxy por país), que no existe todavía y no se promete.
 
+### Reproducción de historia real (paso 3, 2026-10-07)
+
+Se reprodujeron capturas públicas de Internet Archive (7 por página, repartidas desde enero de 2024) de las 8 webs por el extractor y el detector reales, par a par, solo lectura (no se copia ninguna página al repositorio). Klaviyo no tiene capturas en el archivo; HubSpot quedó **no verificable en las 7** (página sin contenido sin navegador); ActiveCampaign nunca mostró un precio legible.
+
+**Lo que enseñó, y lo que se corrigió:**
+- **Un salto de capacidad de lectura no es un cambio.** Brevo pasó de 0 a 48 precios legibles entre dos capturas (empezó a publicar datos estructurados) y se generaron **49 eventos `PRODUCT_ADDED`**; Freshworks, 3. Ahora, si una página pasa de 0 a 3 o más precios legibles es una línea base, y si pasa de 3 o más a 0 es un escaneo no verificado (una captura a medio renderizar), nunca decenas de altas o bajas.
+- **La clave de un plan no puede depender del periodo.** En Mailchimp el periodo (`/mo`) aparecía y desaparecía entre capturas y los 4 planes salían como 4 bajas y 4 altas. Ahora la clave es `plan:{nombre}` y el periodo solo se añade cuando la página lista el mismo plan dos veces (mensual y anual). `EXTRACTOR_VERSION = 7`.
+- Resultado medido (mismas capturas, antes -> después): Brevo 49 -> 0 eventos de producto; Freshworks 3 -> 0; Mailchimp 8 altas/bajas -> 0.
+
+**Lo que NO está resuelto (hallazgos honestos):**
+- **En todos los pares reproducidos hubo 0 `PRICE_CHANGE`.** Las páginas con precios bien leídos (Mailchimp, Brevo, Freshworks) no cambiaron de precio en las capturas muestreadas, así que **la detección de un cambio real de precio no se ha podido validar con estos datos**; solo se ha validado que no inventa ruido. Pipedrive sí subió de precio (la evidencia del `CONTENT_CHANGE` muestra `29 -> 34`, `49 -> 59`), pero sus planes no se extraen como entidades, así que el cambio llegó como cambio de contenido y no como `PRICE_CHANGE` con nombre de plan.
+- **Zoho sigue siendo ruidoso** (hasta 10 bajas y 4 altas en un solo par): su maquetación cambia mucho entre capturas y algunos nombres salen de títulos de sección ("Team users"). Es el siguiente candidato del corpus.
+- **Las capturas del archivo no son iguales a la web en vivo** (algunas páginas se guardaron sin su JavaScript): un "0 precios" en el archivo puede ser del archivo y no de la web.
+- **Los `CONTENT_CHANGE` siguen siendo el evento más frecuente** (casi un par sí y otro también): son rediseños y retoques de texto reales, con severidad baja, pero a escala son ruido para el cliente. Se necesita una política de agrupación en la Fase D (prioridad explicable).
+
 ### Fase D — Signals y priorización explicable (2-3 semanas)
 
 Tablas `Entity/EntityVersion`, `Signal/SignalEvidence` (promoción solo por reglas sobre eventos verificados), prioridad explicable (magnitud, recencia, frecuencia, nº de competidores, categoría estratégica elegida por el cliente, relevancia del competidor, significancia histórica; desglose por factor, pesos configurables y versionados; **importance** separada de **confidence**), alertas con niveles definidos por reglas observables, deduplicación y explicación obligatoria, primer dashboard "qué debes saber hoy". Errores: E27, E28, E16 (sesión), E33.

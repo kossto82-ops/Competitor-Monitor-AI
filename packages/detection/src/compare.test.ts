@@ -567,4 +567,35 @@ describe("compareSnapshots - promotion added/changed/removed", () => {
       expect(one.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(true);
     });
   });
+
+  describe("capability jumps (history replay)", () => {
+    const plans = (n: number) => Array.from({ length: n }, (_, i) => priceEntity({ key: `plan:p${i}`, label: `P${i}`, value: `${(i + 1) * 10}.00` }));
+    const run = (before: ExtractedEntity[], after: ExtractedEntity[]) =>
+      compareSnapshots(makePrior({ entities: before }), makeCurrent({ contentHash: "hash-b", structuredDataHash: "struct-b", entities: after }));
+
+    it("a page that goes from no readable prices to many is a new baseline, not that many new products", () => {
+      const result = run([], plans(48));
+      expect(result.verificationState).toBe("NO_CHANGE");
+      expect(result.changeEvents).toEqual([]);
+      expect(result.reason).toContain("48 readable prices");
+    });
+
+    it("a page that stops showing any readable price is unverified, not that many removed products", () => {
+      const result = run(plans(5), []);
+      expect(result.verificationState).toBe("FAILED_TO_VERIFY");
+      expect(result.changeEvents).toEqual([]);
+      expect(result.reason).toContain("no longer shows any readable price (5 before)");
+    });
+
+    it("still reports a genuinely new plan on a page that already had prices, and a first plan on an empty page", () => {
+      expect(run(plans(3), plans(4)).changeEvents.map((e) => e.changeType)).toContain("PRODUCT_ADDED");
+      expect(run([], plans(2)).changeEvents.map((e) => e.changeType)).toContain("PRODUCT_ADDED"); // below the threshold: a real launch
+      expect(run(plans(2), []).verificationState).toBe("CHANGED"); // below the threshold: a real retirement
+    });
+
+    it("plan keys without a period (a page that lists each plan once) still link a rename", () => {
+      const events = run([priceEntity({ key: "plan:pro", label: "Pro", value: "29.00" })], [priceEntity({ key: "plan:growth", label: "Growth", value: "29.00" })]).changeEvents;
+      expect(events.every((e) => e.evidenceExcerpt.includes('Possibly renamed: "Pro" -> "Growth"'))).toBe(true);
+    });
+  });
 });

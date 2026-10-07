@@ -12,7 +12,7 @@ import {
   extractVisibleText,
   looksLikeJsShell,
 } from "./structuredData.js";
-import { extractPricingPlans, planToEntity } from "./pricingPlans.js";
+import { extractPricingPlans, plansToEntities } from "./pricingPlans.js";
 import { extractHtmlPromotionEntities, mergeHtmlPromotionsWithJsonLd } from "./htmlPromotions.js";
 import { acceptLanguageFor } from "@cma/core";
 import type { ConditionalRequest, Extractor, FetchFn } from "./types.js";
@@ -98,7 +98,7 @@ export class CheerioExtractor implements Extractor {
       // Phase 29 C3: JSON-LD stays the first choice (machine-readable, history already keyed on it).
       // Without it, plan cards/tables give real PRICE entities with a plan name; only when those find
       // nothing do we fall back to the context-hashed GENERIC prices (evidence only, never diffed).
-      const planEntities = jsonLdEntities.length > 0 ? [] : extractPricingPlans($, cleanBody($)).map(planToEntity);
+      const planEntities = jsonLdEntities.length > 0 ? [] : plansToEntities(extractPricingPlans($, cleanBody($)));
       const baseEntities: ExtractedEntity[] =
         jsonLdEntities.length > 0 ? jsonLdEntities : planEntities.length > 0 ? planEntities : extractGenericPriceEntities(visibleText);
       // Phase 24: a second, independent promotion source (bounded HTML

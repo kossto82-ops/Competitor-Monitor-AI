@@ -14,5 +14,5 @@ export {
 } from "./structuredData.js";
 export { extractHtmlPromotionEntities, mergeHtmlPromotionsWithJsonLd } from "./htmlPromotions.js";
 export { defaultFetch, createRobotsCheckerFromEnv, monitoringMaxBodyBytes, HTML_CONTENT_TYPES } from "./defaultFetch.js";
-export { extractPricingPlans, findPriceTokens, isPriceOnly, detectPeriod, planToEntity, type PlanPrice } from "./pricingPlans.js";
+export { extractPricingPlans, findPriceTokens, isPriceOnly, detectPeriod, planToEntity, plansToEntities, type PlanPrice } from "./pricingPlans.js";
 export { RobotsChecker, parseRobots, isPathAllowed } from "./robots.js";

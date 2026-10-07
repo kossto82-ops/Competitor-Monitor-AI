@@ -47,6 +47,8 @@ export interface CompareOptions {
   now?: Date;
 }
 
+const MIN_PRICES_FOR_CAPABILITY_JUMP = 3;
+
 export function compareSnapshots(prior: PriorSnapshotData | null, current: CurrentExtractionData, options: CompareOptions = {}): ComparisonResult {
   const failureReason = describeExtractionFailure(current);
   if (failureReason) {
@@ -80,6 +82,27 @@ export function compareSnapshots(prior: PriorSnapshotData | null, current: Curre
   // The same thing happens without anyone touching a setting when the monitoring server's address moves
   // (many sites choose the currency from it): every price flips currency at once. One such flip is a
   // new baseline, not dozens of price changes.
+  // How many prices the page lets us read is a property of the page AND of the extractor. A page that gains
+  // machine-readable markup (0 -> dozens of prices) or loses it (a partially rendered capture) did not launch
+  // or retire all those plans overnight. Replaying real history gave 49 PRODUCT_ADDED events for one such
+  // jump. The jump is a new baseline, or an unverified scan, never a flood of events.
+  const priorPrices = prior.entities.filter((e) => e.type === "PRICE").length;
+  const currentPrices = current.entities.filter((e) => e.type === "PRICE").length;
+  if (priorPrices === 0 && currentPrices >= MIN_PRICES_FOR_CAPABILITY_JUMP) {
+    return {
+      verificationState: "NO_CHANGE",
+      reason: `The page now exposes ${currentPrices} readable prices where none were readable before; this scan is the new baseline for them, not ${currentPrices} new products.`,
+      changeEvents: [],
+    };
+  }
+  if (currentPrices === 0 && priorPrices >= MIN_PRICES_FOR_CAPABILITY_JUMP) {
+    return {
+      verificationState: "FAILED_TO_VERIFY",
+      reason: `The page no longer shows any readable price (${priorPrices} before); it may be partially rendered or have changed format, so no plan is reported as removed.`,
+      changeEvents: [],
+    };
+  }
+
   const marketFlip = detectMarketFlip(prior.entities, current.entities);
   if (marketFlip) {
     return {
@@ -566,7 +589,10 @@ function planNameOf(label: string): string {
 
 function keyFamily(key: string | null): string | null {
   if (!key) return null;
-  if (key.startsWith("plan:")) return `plan:${key.slice(key.lastIndexOf(":") + 1)}`; // same billing period
+  if (key.startsWith("plan:")) {
+    const period = /^plan:[^:]+:(month|year|na)$/.exec(key)?.[1];
+    return period ? `plan:${period}` : "plan:single"; // same billing period, or a page that lists each plan once
+  }
   if (key.startsWith("jsonld:")) return "jsonld";
   return null;
 }

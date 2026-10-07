@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { cleanBody } from "./structuredData.js";
-import { extractPricingPlans, planToEntity } from "./pricingPlans.js";
+import { extractPricingPlans, planToEntity, plansToEntities } from "./pricingPlans.js";
 
 /**
  * Phase 29 C3: the pricing extractor is measured, not just unit tested. Every fixture in
@@ -84,5 +84,21 @@ describe("planToEntity", () => {
     const b = planToEntity({ name: "ENTREPRISE", amount: 2, currency: "EUR", period: null, token: "2 €" });
     expect(a.key).toBe(b.key);
     expect(a.key).toBe("plan:entreprise:na");
+  });
+});
+
+describe("plansToEntities (history replay)", () => {
+  const plan = (name: string, period: "month" | "year" | null, amount = 10) => ({ name, amount, currency: "USD", period, token: `$${amount}` });
+
+  it("keys a plan by its name alone, so a period that appears or disappears between captures is not a rename", () => {
+    const withPeriod = plansToEntities([plan("Premium", "month"), plan("Standard", "month")]);
+    const withoutPeriod = plansToEntities([plan("Premium", null), plan("Standard", null)]);
+    expect(withPeriod.map((e) => e.key)).toEqual(["plan:premium", "plan:standard"]);
+    expect(withoutPeriod.map((e) => e.key)).toEqual(["plan:premium", "plan:standard"]);
+  });
+
+  it("adds the period to the key only for a plan the page lists more than once", () => {
+    const entities = plansToEntities([plan("Pro", "month", 10), plan("Pro", "year", 96), plan("Team", "month", 30)]);
+    expect(entities.map((e) => e.key)).toEqual(["plan:pro:month", "plan:pro:year", "plan:team"]);
   });
 });
