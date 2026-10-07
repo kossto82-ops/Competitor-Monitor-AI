@@ -33,6 +33,7 @@ function makeDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
     markMonitoringJobRunning: vi.fn().mockResolvedValue({ id: "pending-job-1" }),
     markMonitoringJobFailed: vi.fn().mockResolvedValue(undefined),
     persistMonitoringResult: vi.fn().mockResolvedValue(undefined),
+    persistNotModifiedResult: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -200,6 +201,72 @@ describe("runMonitoringJob", () => {
       expect(result.verificationState).toBe("FAILED_TO_VERIFY");
       expect(deps.markMonitoringJobFailed).not.toHaveBeenCalled();
       expect(deps.persistMonitoringResult).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("conditional requests (Phase 29 B3b)", () => {
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+    const priorSnapshot = {
+      id: "snap-1",
+      contentHash: "hash-current",
+      structuredDataHash: "struct-current",
+      normalizedContent: "Pro Plan 39 EUR",
+      extractedEntities: [],
+    };
+    const withValidators = (overrides: Record<string, unknown> = {}) => ({
+      id: "url-1",
+      organizationId: "org-1",
+      url: "https://competitor.test/pricing",
+      etag: '"abc"',
+      lastModifiedHeader: "Wed, 01 Oct 2026 10:00:00 GMT",
+      validatorsSetAt: hoursAgo(2),
+      ...overrides,
+    });
+
+    function conditionalDeps(url: Record<string, unknown>, extraction: Partial<ExtractionResult> = {}, prior: unknown = priorSnapshot) {
+      const extract = vi.fn().mockResolvedValue(extractionResult(extraction));
+      const deps = makeDeps({
+        extractor: { extract },
+        getMonitoredUrlForOrg: vi.fn().mockResolvedValue(url),
+        getLatestVerifiedSnapshot: vi.fn().mockResolvedValue(prior),
+      });
+      return { deps, extract };
+    }
+
+    it("sends the stored validators on a scheduled scan that has a verified snapshot", async () => {
+      const { deps, extract } = conditionalDeps(withValidators());
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+      expect(extract).toHaveBeenCalledWith({
+        url: "https://competitor.test/pricing",
+        conditional: { etag: '"abc"', lastModified: "Wed, 01 Oct 2026 10:00:00 GMT" },
+      });
+    });
+
+    it("records a 304 as a successful scan with NO snapshot and no comparison", async () => {
+      const { deps } = conditionalDeps(withValidators(), { httpStatus: 304, notModified: true, normalizedContent: "", contentHash: null });
+      const result = await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+      expect(deps.persistNotModifiedResult).toHaveBeenCalledWith("job-1", expect.objectContaining({ monitoredUrlId: "url-1" }));
+      expect(deps.persistMonitoringResult).not.toHaveBeenCalled();
+      expect(result).toEqual({ monitoringJobId: "job-1", verificationState: "NO_CHANGE", changeEventCount: 0 });
+    });
+
+    it("always does a full fetch for a manual scan (the payload carries a job id)", async () => {
+      const { deps, extract } = conditionalDeps(withValidators());
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1", monitoringJobId: "pending-job-1" }, deps);
+      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
+    });
+
+    it("does a full fetch when there is no verified snapshot, no validators, or they are too old", async () => {
+      for (const [url, prior] of [
+        [withValidators(), null],
+        [withValidators({ etag: null, lastModifiedHeader: null }), priorSnapshot],
+        [withValidators({ validatorsSetAt: hoursAgo(24 * 8) }), priorSnapshot],
+        [withValidators({ validatorsSetAt: null }), priorSnapshot],
+      ] as const) {
+        const { deps, extract } = conditionalDeps(url, {}, prior);
+        await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+        expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
+      }
     });
   });
 });

@@ -9,7 +9,7 @@ import {
   looksLikeJsShell,
 } from "./structuredData.js";
 import { extractHtmlPromotionEntities, mergeHtmlPromotionsWithJsonLd } from "./htmlPromotions.js";
-import type { Extractor, FetchFn } from "./types.js";
+import type { ConditionalRequest, Extractor, FetchFn } from "./types.js";
 import type { RobotsChecker } from "./robots.js";
 
 /**
@@ -31,14 +31,34 @@ export class CheerioExtractor implements Extractor {
     private readonly robots?: Pick<RobotsChecker, "isAllowed">,
   ) {}
 
-  async extract({ url }: { url: string }): Promise<ExtractionResult> {
+  async extract({ url, conditional }: { url: string; conditional?: ConditionalRequest }): Promise<ExtractionResult> {
     const start = Date.now();
     try {
       if (this.robots && !(await this.robots.isAllowed(url))) {
         return this.failure(url, null, null, "This page is disallowed for automated access by the site's robots.txt.", Date.now() - start);
       }
-      const page = await this.fetchFn(url);
+      const hasValidators = Boolean(conditional && (conditional.etag || conditional.lastModified));
+      const page = await this.fetchFn(url, hasValidators ? conditional : undefined);
       const durationMs = Date.now() - start;
+
+      // 304 is only meaningful because WE asked conditionally; without validators it stays an error.
+      if (page.status === 304 && hasValidators) {
+        return {
+          method: this.method,
+          requestedUrl: url,
+          finalUrl: page.finalUrl,
+          httpStatus: 304,
+          errorMessage: null,
+          normalizedContent: "",
+          contentHash: null,
+          structuredDataHash: null,
+          extractedEntities: [],
+          confidence: 1,
+          warnings: [],
+          durationMs,
+          notModified: true,
+        };
+      }
 
       if (page.status < 200 || page.status >= 300) {
         return this.failure(url, page.finalUrl, page.status, `Unexpected HTTP status ${page.status}`, durationMs);
@@ -88,6 +108,7 @@ export class CheerioExtractor implements Extractor {
         confidence,
         warnings,
         durationMs,
+        ...(page.headers && (page.headers.etag || page.headers.lastModified) ? { validators: page.headers } : {}),
       };
     } catch (err) {
       return this.failure(

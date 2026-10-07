@@ -25,6 +25,8 @@ export interface SafeFetchOptions {
    * URL must not be buffered and parsed). A missing Content-Type is allowed.
    */
   allowedContentTypes?: RegExp;
+  /** Sent as If-None-Match / If-Modified-Since; a 304 is then returned to the caller as-is. */
+  conditional?: { etag?: string | null; lastModified?: string | null };
   /** Test seam - defaults to a real DNS lookup. */
   resolveFn?: ResolveFn;
 }
@@ -71,6 +73,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
     maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
     userAgent = DEFAULT_USER_AGENT,
     allowedContentTypes,
+    conditional,
     resolveFn,
   } = options;
 
@@ -81,7 +84,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
     assertProtocolAllowed(currentUrl);
     const validatedIp = await resolveAndValidateHost(currentUrl.hostname, resolveFn);
 
-    const response = await requestViaIp(currentUrl, validatedIp, { timeoutMs, maxBodyBytes, userAgent, allowedContentTypes });
+    const response = await requestViaIp(currentUrl, validatedIp, { timeoutMs, maxBodyBytes, userAgent, allowedContentTypes, conditional });
 
     if (isRedirectStatus(response.status) && response.headers.location) {
       if (redirectsLeft <= 0) {
@@ -110,7 +113,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
 export function requestViaIp(
   url: URL,
   connectIp: string,
-  opts: { timeoutMs: number; maxBodyBytes: number; userAgent: string; allowedContentTypes?: RegExp },
+  opts: { timeoutMs: number; maxBodyBytes: number; userAgent: string; allowedContentTypes?: RegExp; conditional?: { etag?: string | null; lastModified?: string | null } },
 ): Promise<Omit<SafeFetchResult, "finalUrl">> {
   const isHttps = url.protocol === "https:";
   const transport = isHttps ? https : http;
@@ -129,6 +132,8 @@ export function requestViaIp(
           Host: url.hostname,
           "User-Agent": opts.userAgent,
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          ...(opts.conditional?.etag ? { "If-None-Match": opts.conditional.etag } : {}),
+          ...(opts.conditional?.lastModified ? { "If-Modified-Since": opts.conditional.lastModified } : {}),
         },
         // Preserve TLS validation against the real hostname even though we
         // connected via IP.

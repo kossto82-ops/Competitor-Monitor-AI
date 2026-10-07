@@ -121,4 +121,35 @@ describe("CheerioExtractor", () => {
     const result = await new CheerioExtractor(fetchFn).extract({ url: "https://a.test/file" });
     expect(result.errorMessage).toMatch(/Unsupported content type/);
   });
+
+  it("returns notModified (and no content) when the server answers 304 to a conditional request", async () => {
+    let seen: unknown;
+    const fetchFn: FetchFn = async (_url, conditional) => {
+      seen = conditional;
+      return { status: 304, body: "", finalUrl: "https://a.test/pricing" };
+    };
+    const result = await new CheerioExtractor(fetchFn).extract({ url: "https://a.test/pricing", conditional: { etag: '"v1"', lastModified: null } });
+    expect(seen).toEqual({ etag: '"v1"', lastModified: null });
+    expect(result.notModified).toBe(true);
+    expect(result.errorMessage).toBeNull();
+    expect(result.extractedEntities).toEqual([]);
+  });
+
+  it("treats a 304 as an error when no validators were sent (it cannot mean unchanged)", async () => {
+    const fetchFn: FetchFn = async () => ({ status: 304, body: "", finalUrl: "https://a.test/pricing" });
+    const result = await new CheerioExtractor(fetchFn).extract({ url: "https://a.test/pricing" });
+    expect(result.notModified).toBeUndefined();
+    expect(result.errorMessage).toMatch(/304/);
+  });
+
+  it("surfaces the response validators on a successful full fetch", async () => {
+    const fetchFn: FetchFn = async () => ({
+      status: 200,
+      body: "<html><body>Pro $10</body></html>",
+      finalUrl: "https://a.test/pricing",
+      headers: { etag: '"v2"', lastModified: null },
+    });
+    const result = await new CheerioExtractor(fetchFn).extract({ url: "https://a.test/pricing" });
+    expect(result.validators).toEqual({ etag: '"v2"', lastModified: null });
+  });
 });

@@ -231,6 +231,12 @@ model MonitoredUrl {
   // sustained failure; isActive is false at the same time. Cleared when the customer resumes it.
   disabledAt              DateTime?
   disabledReason          String?
+  // Phase 29 B3b: cache validators of the last VERIFIED full fetch, sent back as If-None-Match /
+  // If-Modified-Since. Cleared by any scan that is not a verified full fetch, and ignored once
+  // older than CMA_CONDITIONAL_MAX_AGE_HOURS so a server with broken validators cannot hide changes.
+  etag                    String?
+  lastModifiedHeader      String?
+  validatorsSetAt         DateTime?
   createdAt               DateTime    @default(now())
   updatedAt               DateTime    @updatedAt
 

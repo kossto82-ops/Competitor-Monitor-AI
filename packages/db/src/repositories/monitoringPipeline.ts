@@ -150,13 +150,64 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
       },
     });
 
+    // Validators are only kept from a verified full fetch; every other outcome clears them so the
+    // next scan is unconditional and produces a fresh snapshot (a 304 must never be answered for a
+    // page whose latest snapshot is not the verified one the validators came from).
+    const keepValidators = fetchSucceeded && comparison.verificationState !== "FAILED_TO_VERIFY" && extraction.validators;
+    const validatorData = keepValidators
+      ? { etag: extraction.validators!.etag, lastModifiedHeader: extraction.validators!.lastModified, validatorsSetAt: new Date() }
+      : { etag: null, lastModifiedHeader: null, validatorsSetAt: null };
+
     await tx.monitoredUrl.update({
       where: { id: monitoredUrlId },
-      data: fetchSucceeded
-        ? { lastSuccessfulScanAt: new Date(), consecutiveFailureCount: 0, lastAttemptAt: new Date() }
-        : { consecutiveFailureCount: { increment: 1 }, lastAttemptAt: new Date() },
+      data: {
+        ...(fetchSucceeded
+          ? { lastSuccessfulScanAt: new Date(), consecutiveFailureCount: 0, lastAttemptAt: new Date() }
+          : { consecutiveFailureCount: { increment: 1 }, lastAttemptAt: new Date() }),
+        ...validatorData,
+      },
     });
 
     return snapshot;
+  });
+}
+
+export interface PersistNotModifiedInput {
+  organizationId: string;
+  monitoredUrlId: string;
+  extraction: ExtractionResult;
+  usage: { browserEscalated: boolean; aiCallMade: boolean };
+}
+
+/**
+ * Phase 29 B3b: the server answered 304 Not Modified, so the page equals the latest verified
+ * snapshot. The scan counts as a success (job COMPLETED, usage recorded, lastSuccessfulScanAt and
+ * the failure streak updated) but NO snapshot is written - that is the storage the conditional
+ * request exists to save. The validators stay as they were.
+ */
+export async function persistNotModifiedResult(jobId: string, input: PersistNotModifiedInput) {
+  const { organizationId, monitoredUrlId, extraction, usage } = input;
+  const now = new Date();
+
+  return prisma.$transaction(async (tx) => {
+    await tx.monitoringJob.update({
+      where: { id: jobId },
+      data: { status: "COMPLETED", finishedAt: now, errorMessage: null },
+    });
+    await tx.usageRecord.create({
+      data: {
+        organizationId,
+        monitoringJobId: jobId,
+        extractionMethod: extraction.method,
+        browserEscalated: usage.browserEscalated,
+        aiCallMade: usage.aiCallMade,
+        fetchSucceeded: true,
+        processingTimeMs: extraction.durationMs,
+      },
+    });
+    await tx.monitoredUrl.update({
+      where: { id: monitoredUrlId },
+      data: { lastSuccessfulScanAt: now, consecutiveFailureCount: 0, lastAttemptAt: now },
+    });
   });
 }

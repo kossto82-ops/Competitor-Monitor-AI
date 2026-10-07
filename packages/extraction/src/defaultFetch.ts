@@ -13,9 +13,23 @@ export function monitoringMaxBodyBytes(): number {
   return Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_BODY_BYTES;
 }
 
-export const defaultFetch: FetchFn = async (url) => {
-  const result = await safeGet(url, { maxBodyBytes: monitoringMaxBodyBytes(), allowedContentTypes: HTML_CONTENT_TYPES });
-  return { status: result.status, body: result.body, finalUrl: result.finalUrl };
+function headerValue(value: string | string[] | undefined): string | null {
+  const v = Array.isArray(value) ? value[0] : value;
+  return v && v.trim() ? v.trim() : null;
+}
+
+export const defaultFetch: FetchFn = async (url, conditional) => {
+  const result = await safeGet(url, {
+    maxBodyBytes: monitoringMaxBodyBytes(),
+    allowedContentTypes: HTML_CONTENT_TYPES,
+    ...(conditional ? { conditional } : {}),
+  });
+  return {
+    status: result.status,
+    body: result.body,
+    finalUrl: result.finalUrl,
+    headers: { etag: headerValue(result.headers.etag), lastModified: headerValue(result.headers["last-modified"]) },
+  };
 };
 
 /**

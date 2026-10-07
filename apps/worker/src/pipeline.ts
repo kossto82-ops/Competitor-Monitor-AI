@@ -27,6 +27,15 @@ interface MonitoredUrlLike {
   id: string;
   organizationId: string;
   url: string;
+  etag?: string | null;
+  lastModifiedHeader?: string | null;
+  validatorsSetAt?: Date | null;
+}
+
+/** CMA_CONDITIONAL_MAX_AGE_HOURS (default 168 = 7 days): after this a full fetch is forced regardless of validators. */
+export function conditionalMaxAgeMs(): number {
+  const n = Number(process.env.CMA_CONDITIONAL_MAX_AGE_HOURS);
+  return (Number.isFinite(n) && n >= 0 ? n : 168) * 3_600_000;
 }
 
 interface PriorSnapshotLike {
@@ -52,6 +61,15 @@ interface PriorSnapshotLike {
  * @cma/extraction implementations.
  */
 export interface PipelineDeps {
+  persistNotModifiedResult: (
+    jobId: string,
+    input: {
+      organizationId: string;
+      monitoredUrlId: string;
+      extraction: ExtractionResult;
+      usage: { browserEscalated: boolean; aiCallMade: boolean };
+    },
+  ) => Promise<unknown>;
   extractor: Pick<Extractor, "extract">;
   getMonitoredUrlForOrg: (organizationId: string, monitoredUrlId: string) => Promise<MonitoredUrlLike>;
   getLatestVerifiedSnapshot: (monitoredUrlId: string) => Promise<PriorSnapshotLike | null>;
@@ -80,6 +98,7 @@ export function createDefaultPipelineDeps(): PipelineDeps {
     markMonitoringJobRunning: db.markMonitoringJobRunning,
     markMonitoringJobFailed: db.markMonitoringJobFailed,
     persistMonitoringResult: db.persistMonitoringResult,
+    persistNotModifiedResult: db.persistNotModifiedResult,
   };
 }
 
@@ -135,7 +154,28 @@ export async function runMonitoringJob(
         }
       : null;
 
-    const extraction = await deps.extractor.extract({ url: monitoredUrl.url });
+    // Conditional request (Phase 29 B3b): only when there is a verified snapshot to fall back on,
+    // the validators are fresh enough, and this is a scheduled scan - a customer who clicks "Scan
+    // now" (the payload carries the job id the API created) always gets a full fetch.
+    const validatorsFresh =
+      monitoredUrl.validatorsSetAt != null && Date.now() - monitoredUrl.validatorsSetAt.getTime() < conditionalMaxAgeMs();
+    const useConditional =
+      !payload.monitoringJobId && priorSnapshot != null && validatorsFresh && Boolean(monitoredUrl.etag || monitoredUrl.lastModifiedHeader);
+
+    const extraction = await deps.extractor.extract({
+      url: monitoredUrl.url,
+      ...(useConditional ? { conditional: { etag: monitoredUrl.etag ?? null, lastModified: monitoredUrl.lastModifiedHeader ?? null } } : {}),
+    });
+
+    if (extraction.notModified) {
+      await deps.persistNotModifiedResult(job.id, {
+        organizationId: monitoredUrl.organizationId,
+        monitoredUrlId: monitoredUrl.id,
+        extraction,
+        usage: { browserEscalated: false, aiCallMade: false },
+      });
+      return { monitoringJobId: job.id, verificationState: "NO_CHANGE", changeEventCount: 0 };
+    }
 
     const comparison = compareSnapshots(prior, {
       httpStatus: extraction.httpStatus,

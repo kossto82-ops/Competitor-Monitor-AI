@@ -132,7 +132,12 @@ resuming it in the UI clears the stop and its failure streak. This pass only run
 HTML/XHTML is refused before its body is downloaded, and bodies over 3 MB (`CMA_FETCH_MAX_BODY_BYTES`) fail
 the scan. The monitor honours each site's robots.txt for its user agent (`CMA_ROBOTS_MODE=respect`, the
 default; `off` for sources you own). A page the site disallows fails with an explicit message and, if it
-keeps failing, ends in the automatic stop above. A missing or unreachable robots.txt never blocks a scan. See
+keeps failing, ends in the automatic stop above. A missing or unreachable robots.txt never blocks a scan.
+
+**Conditional requests (Phase 29 B3b).** Scheduled scans send the validators (`ETag` / `Last-Modified`) saved
+from the last verified fetch; a `304 Not Modified` counts as a successful scan but writes no new snapshot.
+"Scan now" is always a full fetch, and so is any scan once the validators are older than
+`CMA_CONDITIONAL_MAX_AGE_HOURS` (168). Validators are dropped after any failed or unverified scan. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 

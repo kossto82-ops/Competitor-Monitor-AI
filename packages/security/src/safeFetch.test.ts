@@ -42,6 +42,17 @@ describe("requestViaIp (HTTP mechanics against a local test server)", () => {
         res.end("x".repeat(1000));
         return;
       }
+      if (req.url === "/conditional") {
+        const etag = '"v1"';
+        if (req.headers["if-none-match"] === etag) {
+          res.writeHead(304, { ETag: etag });
+          res.end();
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "text/html", ETag: etag });
+        res.end("<html>full</html>");
+        return;
+      }
       if (req.url === "/pdf") {
         res.writeHead(200, { "Content-Type": "application/pdf" });
         res.end("%PDF-1.4 fake");
@@ -108,6 +119,20 @@ describe("requestViaIp (HTTP mechanics against a local test server)", () => {
     expect(untyped.body).toContain("untyped");
     const blocked = await requestViaIp(new URL(`http://127.0.0.1:${port}/forbidden-json`), "127.0.0.1", { ...opts, allowedContentTypes: HTML_ONLY });
     expect(blocked.status).toBe(403);
+  });
+
+  it("sends If-None-Match and returns the 304 as-is", async () => {
+    const url = new URL(`http://127.0.0.1:${port}/conditional`);
+    const full = await requestViaIp(url, "127.0.0.1", opts);
+    expect(full.status).toBe(200);
+    expect(full.headers.etag).toBe('"v1"');
+
+    const notModified = await requestViaIp(url, "127.0.0.1", { ...opts, allowedContentTypes: HTML_ONLY, conditional: { etag: '"v1"', lastModified: null } });
+    expect(notModified.status).toBe(304);
+    expect(notModified.body).toBe("");
+
+    const changed = await requestViaIp(url, "127.0.0.1", { ...opts, conditional: { etag: '"stale"', lastModified: null } });
+    expect(changed.status).toBe(200);
   });
 
   it("does not filter content types when allowedContentTypes is not set (other callers unaffected)", async () => {

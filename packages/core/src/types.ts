@@ -37,6 +37,18 @@ export interface ExtractionResult {
   confidence: number;
   warnings: string[];
   durationMs: number;
+  /**
+   * Phase 29 B3b: the server answered 304 Not Modified to our conditional request, i.e. the page is
+   * byte-for-byte what we already hold. No content is extracted and no snapshot should be written.
+   */
+  notModified?: boolean;
+  /** Cache validators of a successful full response, stored so the next scan can be conditional. */
+  validators?: ConditionalValidators;
+}
+
+export interface ConditionalValidators {
+  etag: string | null;
+  lastModified: string | null;
 }
 
 export interface ChangeEventDraft {
