@@ -57,12 +57,52 @@ export function findPriceTokens(text: string): PriceToken[] {
 }
 
 const PRICE_ONLY_REMAINDER =
-  /^(?:[\s/\-–—,.·|*()+:]|\b(?:from|starting|at|only|just|per|a|an|mo|month|monthly|yr|year|yearly|annually|annual|user|seat|member|each|billed|vat|tax|taxes|excl|incl|and|usd|eur|gbp)\b)*$/i;
+  /^(?:[\s/\-–—,.·|*()+:†‡]|\bfor\s+\d+\s+(?:months?|years?)\b|\b(?:from|starting|at|only|just|per|a|an|mo|month|monthly|yr|year|yearly|annually|annual|user|seat|member|each|billed|vat|tax|taxes|excl|incl|and|usd|eur|gbp)\b)*$/i;
 
 /** True when the text is a price and little else ("$49", "$49 / month", "from 29 €"). */
+/**
+ * Some sites render a price as separate elements - `$` `20` `00` - which reads as "$ 20 00". When the
+ * WHOLE text is exactly a symbol, an amount and two digits, the two digits are the cents.
+ */
+export function joinSplitCents(text: string): string {
+  const match = /^\s*([^\d\s]{1,3})\s?(\d{1,6}(?:[.,]\d{3})*)\s(\d{2})\s*$/.exec(text);
+  return match ? `${match[1]}${match[2]}.${match[3]}` : text;
+}
+
+// A configurator's running total ("Total: $1", "Estimated cost") is the answer to the visitor's current
+// slider position, not a plan's price (Klaviyo, Mailchimp).
+const CONFIGURATOR_TOTAL = /\b(?:total|subtotal|estimated?|calculator|your (?:price|cost|plan))\b/i;
+
+function isConfiguratorTotal($: cheerio.CheerioAPI, el: AnyNode): boolean {
+  let node: AnyNode | null = el;
+  for (let depth = 0; depth < 3 && node; depth += 1) {
+    const text = normalizeWhitespace($(node).text());
+    if (text.length <= 60 && CONFIGURATOR_TOTAL.test(text)) return true;
+    node = (node as { parent?: AnyNode | null }).parent ?? null;
+  }
+  return false;
+}
+
+// "$5 of mobile messages", "$10 worth of credit": an amount INCLUDED in a plan, not the plan's price.
+const INCLUDED_VALUE_AFTER = /^\s*(?:of|worth|credits?|included)\b/i;
+
+function isIncludedValue($: cheerio.CheerioAPI, el: AnyNode): boolean {
+  const own = normalizeWhitespace($(el).text());
+  let node = (el as { parent?: AnyNode | null }).parent ?? null;
+  for (let depth = 0; depth < 2 && node; depth += 1) {
+    const text = normalizeWhitespace($(node).text());
+    if (text.length <= 120) {
+      const at = text.indexOf(own);
+      if (at !== -1 && INCLUDED_VALUE_AFTER.test(text.slice(at + own.length))) return true;
+    }
+    node = (node as { parent?: AnyNode | null }).parent ?? null;
+  }
+  return false;
+}
+
 export function isPriceOnly(text: string): boolean {
-  const normalized = normalizeWhitespace(text);
-  if (normalized.length === 0 || normalized.length > 40) return false;
+  const normalized = joinSplitCents(normalizeWhitespace(text));
+  if (normalized.length === 0 || normalized.length > 60) return false;
   const tokens = findPriceTokens(normalized);
   if (tokens.length !== 1) return false;
   const remainder = normalized.replace(tokens[0]!.token, "");
@@ -196,27 +236,25 @@ function documentIndex($: cheerio.CheerioAPI, root: AnyNode, target: AnyNode): n
 /** Extracts every unambiguous plan price from the cleaned page body. */
 export function extractPricingPlans($: cheerio.CheerioAPI, $root: cheerio.Cheerio<AnyNode>): PlanPrice[] {
   const plans: PlanPrice[] = [];
-  const tableHandled = new Set<AnyNode>();
 
   // ---- Tables ---------------------------------------------------------------------------------
   $root.find("table").each((_, table) => {
     const found = plansFromTable($, table);
     if (found.length > 0) plans.push(...found);
-    $(table)
-      .find("*")
-      .each((__, el) => {
-        tableHandled.add(el);
-      });
   });
 
   // ---- Cards ----------------------------------------------------------------------------------
   const priceEls: AnyNode[] = [];
   $root.find("*").each((_, el) => {
-    if (tableHandled.has(el)) return;
+    // Prices inside a table are read by the card logic too: many sites lay their plan cards out in a
+    // layout <table> (Mailchimp), and the table logic alone only sees the columns that look like a header.
+    // A plan found by both is kept once (first wins, below).
     if ($(el).closest(STRUCK).length > 0) return;
     const style = $(el).attr("style") ?? "";
     if (/line-through/i.test(style)) return;
     if (!isPriceOnly($(el).text())) return;
+    if (isConfiguratorTotal($, el)) return;
+    if (isIncludedValue($, el)) return;
     // Take the smallest price-only element: skip when a child already is one.
     const childIsPrice = $(el)
       .children()
@@ -242,11 +280,11 @@ export function extractPricingPlans($: cheerio.CheerioAPI, $root: cheerio.Cheeri
 }
 
 function planFromCard($: cheerio.CheerioAPI, priceEl: AnyNode, allPriceEls: AnyNode[]): PlanPrice | null {
-  const tokenInfo = findPriceTokens(normalizeWhitespace($(priceEl).text()))[0];
+  const tokenInfo = findPriceTokens(joinSplitCents(normalizeWhitespace($(priceEl).text())))[0];
   if (!tokenInfo) return null;
 
   let node: AnyNode | null = (priceEl as { parent?: AnyNode | null }).parent ?? null;
-  for (let depth = 0; depth < 6 && node; depth += 1) {
+  for (let depth = 0; depth < 8 && node; depth += 1) {
     const container = node;
     const inside = allPriceEls.filter((p) => p === container || cheerio.contains(container as never, p as never));
     if (inside.length > 2) return null; // reached the grid of several plans without finding this card's name

@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import type { ExtractedEntity } from "@cma/core";
+import { parseAmount, type ExtractedEntity } from "@cma/core";
 import { sha256 } from "./hash.js";
 
 /**
@@ -29,8 +29,9 @@ export function extractVisibleText($: cheerio.CheerioAPI): string {
  *   3 = plan cards/tables become PRICE entities when there is no JSON-LD (Phase 29 C3)
  *   4 = structured hash covers only entity facts; application shells are unverified (Phase 29 C4)
  *   5 = every JSON-LD offer is a price and entity keys are unique per scan (Phase 29 C5)
+ *   6 = named plan offers, split cents, configurator totals ignored (Phase 29 triage on 8 real sites)
  */
-export const EXTRACTOR_VERSION = 5;
+export const EXTRACTOR_VERSION = 6;
 
 // Page chrome that is not the page's own content. Removed everywhere in the document.
 const ALWAYS_NOISE = "nav, [role='navigation'], [role='banner'], [role='contentinfo'], [role='dialog'], [role='alertdialog'], [role='search']";
@@ -204,6 +205,25 @@ function collectProductLikeEntities(node: unknown, out: ExtractedEntity[], raw: 
     }
   }
 
+  // Phase 29 triage (Brevo): a node that is NOT a commercial type (typically a SoftwareApplication) may
+  // still list its plans as offers that each carry their OWN name - "Free", "Starter", "Standard" - and
+  // their own currency and billing period. That is a plan table, not the SEO "this app is free to
+  // download" offer the commercial-type gate exists to ignore (that one has no name). Only named offers
+  // with a numeric price are taken, keyed by plan, currency and period: one plan is listed once per
+  // currency and per period (Brevo's page carries 60 offers for 5 plans).
+  if (!isCommercialEntity) {
+    for (const offer of extractNamedPlanOffers(obj["offers"])) {
+      out.push({
+        type: "PRICE",
+        key: `jsonld:${offer.name}:${(offer.currency ?? "na").toLowerCase()}:${offer.period ?? "na"}`.toLowerCase(),
+        label: offer.period ? `${offer.name} (per ${offer.period})` : offer.name,
+        value: offer.price,
+        currency: offer.currency,
+        raw,
+      });
+    }
+  }
+
   // Phase 23: same commercial-entity gate as the PRICE entity above (see
   // COMMERCIAL_OFFER_TYPES's doc comment / Phase 22 dogfooding finding) -
   // a promotion attached to a non-commercial node (Organization,
@@ -226,6 +246,40 @@ function collectProductLikeEntities(node: unknown, out: ExtractedEntity[], raw: 
       collectProductLikeEntities(child, out, raw);
     }
   }
+}
+
+interface NamedPlanOffer {
+  name: string;
+  price: string;
+  currency: string | null;
+  period: "month" | "year" | null;
+}
+
+const PERIOD_UNIT_CODES: Record<string, "month" | "year"> = { MON: "month", MONTH: "month", ANN: "year", YEAR: "year", YR: "year" };
+
+function extractNamedPlanOffers(offers: unknown): NamedPlanOffer[] {
+  if (!Array.isArray(offers)) return [];
+  const out: NamedPlanOffer[] = [];
+  for (const offer of offers) {
+    if (!offer || typeof offer !== "object") continue;
+    const obj = offer as Record<string, unknown>;
+    const name = typeof obj["name"] === "string" ? obj["name"].trim() : "";
+    const rawPrice = obj["price"] ?? obj["lowPrice"];
+    if (name.length === 0 || rawPrice === undefined || rawPrice === null) continue;
+    // "Custom Price", "Contact us": a plan without a number is not a price.
+    if (parseAmount(String(rawPrice)) === null) continue;
+    const spec = obj["priceSpecification"] as Record<string, unknown> | undefined;
+    const quantity = spec?.["referenceQuantity"] as Record<string, unknown> | undefined;
+    const unit = typeof quantity?.["unitCode"] === "string" ? (quantity["unitCode"] as string).toUpperCase() : "";
+    out.push({
+      name,
+      price: String(rawPrice),
+      currency: typeof obj["priceCurrency"] === "string" ? (obj["priceCurrency"] as string) : null,
+      period: PERIOD_UNIT_CODES[unit] ?? null,
+    });
+  }
+  // One named offer is more likely an SEO snippet than a plan table.
+  return out.length >= 2 ? out : [];
 }
 
 function extractOffers(offers: unknown): { price: string; currency: string | null }[] {

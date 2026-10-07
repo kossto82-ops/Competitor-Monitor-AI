@@ -149,6 +149,29 @@ Tests: corpus de HTML real versionado; la fase se mide por precisión/recall sob
 
 Nota sobre el corpus: ninguna página de terceros se copia al repositorio sin que lo decidas tú; el corpus de C3 se construye con fixtures escritas a mano que reproducen estructuras reales (tarjetas, tablas, banners, nav/footer) y, si quieres medir contra sitios reales, con las URLs que me indiques.
 
+### Prueba con webs reales (2026-10-07)
+
+Se probó el extractor contra 8 páginas de precios elegidas por el cliente: 4 de herramientas de marketing (ActiveCampaign, Klaviyo, Brevo, Mailchimp) y 4 de CRM B2B SaaS (Zoho CRM, Freshworks, Pipedrive, HubSpot). Son competidores reales entre sí dentro de cada lista, lo que permite probar también la comparación. Solo lectura: no se copia ninguna página de terceros al repositorio; el corpus sigue siendo de fixtures propias que reproducen las estructuras que fallaron.
+
+| Web | Primera lectura | Después del triaje (`EXTRACTOR_VERSION = 6`) |
+|---|---|---|
+| ActiveCampaign | 403 (bloquea al monitor) | igual: **no monitorizable** con peticiones HTTP |
+| Pipedrive | 403 | igual: **no monitorizable** |
+| HubSpot | página vacía sin navegador, escaneo no verificable | igual (correcto: no se inventa nada), **no monitorizable sin navegador** |
+| Klaviyo | **falso positivo** "Platform $1" (el total de un configurador) | sin planes (es un configurador de precio por número de perfiles); ya no inventa ni toma créditos incluidos ("$5 of mobile messages") por precios |
+| Brevo | 0 planes (sin texto visible) | **48 precios** leídos de JSON-LD (planes con nombre propio x moneda x periodo; los "Custom Price" se omiten) |
+| Mailchimp | 0 planes, 11 precios sueltos | **4 de 4** (Free, Essentials, Standard, Premium): precio partido en símbolo/entero/centavos dentro de una tabla de maquetación |
+| Zoho CRM | 8 planes en **rupias** | igual: depende de la IP desde la que se pide (ver abajo) |
+| Freshworks | 3 planes correctos (Growth $9, Pro $39, Enterprise $59) | igual |
+
+Cambios que salieron de esta prueba: (1) ofertas con nombre propio en JSON-LD de nodos no comerciales (SoftwareApplication) se leen como planes, clave `jsonld:{plan}:{moneda}:{periodo}`, solo con precio numérico y con 2 o más ofertas (una sola oferta sin nombre sigue ignorándose: caso Dropbox); (2) precio partido en elementos (`$` `20` `00` = $20.00); (3) totales de configurador ("Total: $1", "Estimated") y valores incluidos ("$5 of ...", "worth", "credits") ya no son precios de plan; (4) la subida del límite de búsqueda del nombre de la tarjeta (de 6 a 8 niveles) y la lectura de tarjetas dentro de tablas de maquetación; (5) `†` y `‡` no impiden reconocer un precio. Dos fixtures nuevas en el corpus (17 páginas, precisión y recall 1,000).
+
+**Hallazgos de producto que esta prueba dejó abiertos:**
+- **2 de 8 webs bloquean al monitor (403) y 1 necesita navegador.** No se va a intentar esquivar la protección anti-bots. La salida legítima es un navegador bajo demanda (Fase H) o otra fuente aportada por el cliente. Hasta entonces la interfaz debe decir con claridad "no se puede monitorizar" (el escaneo ya queda como no verificable y cuenta contra la salud de la fuente).
+- **El precio depende de desde dónde se pide.** Zoho respondió en rupias y Stripe, en una prueba anterior, en baht, porque el servidor decide la moneda por la IP. El monitor no fija país ni idioma, así que el resultado no es reproducible entre máquinas. Pendiente: ajuste de mercado (país e idioma) por organización o por URL.
+- **Los precios con configurador (Klaviyo) y los promocionales (Mailchimp: "Save 50% ... for 12 months") no se pueden reducir a un precio de plan estable;** se leen tal como la página los muestra por defecto y eso queda documentado, no resuelto.
+- **Una misma web sirve variantes distintas por petición** (Klaviyo mostró dos maquetaciones distintas en minutos): refuerza la bajada de severidad de oscilaciones de C4.
+
 ### Fase D — Signals y priorización explicable (2-3 semanas)
 
 Tablas `Entity/EntityVersion`, `Signal/SignalEvidence` (promoción solo por reglas sobre eventos verificados), prioridad explicable (magnitud, recencia, frecuencia, nº de competidores, categoría estratégica elegida por el cliente, relevancia del competidor, significancia histórica; desglose por factor, pesos configurables y versionados; **importance** separada de **confidence**), alertas con niveles definidos por reglas observables, deduplicación y explicación obligatoria, primer dashboard "qué debes saber hoy". Errores: E27, E28, E16 (sesión), E33.

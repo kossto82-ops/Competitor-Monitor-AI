@@ -46,3 +46,33 @@ describe("entity identity (Phase 29 C5)", () => {
     expect(disambiguateKeys(input).map((e) => e.key)).toEqual(out.map((e) => e.key));
   });
 });
+
+describe("named plan offers in non-commercial nodes (Phase 29 triage: Brevo)", () => {
+  const offer = (name: string, price: string, currency: string, unit: string) => ({
+    "@type": "Offer",
+    name,
+    price,
+    priceCurrency: currency,
+    priceSpecification: { "@type": "UnitPriceSpecification", price, priceCurrency: currency, referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: unit } },
+  });
+
+  it("reads a SoftwareApplication plan table: one price per plan, currency and billing period", () => {
+    const entities = extractJsonLdEntities(
+      ld({
+        "@type": "SoftwareApplication",
+        name: "Brevo",
+        offers: [offer("Starter", "9", "USD", "MON"), offer("Starter", "96.96", "USD", "ANN"), offer("Starter", "7", "EUR", "MON"), offer("Enterprise", "Custom Price", "USD", "MON")],
+      }),
+    );
+    expect(entities.map((e) => [e.key, e.value, e.currency, e.label])).toEqual([
+      ["jsonld:starter:usd:month", "9", "USD", "Starter (per month)"],
+      ["jsonld:starter:usd:year", "96.96", "USD", "Starter (per year)"],
+      ["jsonld:starter:eur:month", "7", "EUR", "Starter (per month)"],
+    ]);
+  });
+
+  it("still ignores the unnamed SEO offer of a SoftwareApplication, and a lone named offer", () => {
+    expect(extractJsonLdEntities(ld({ "@type": "SoftwareApplication", name: "App", offers: { "@type": "Offer", category: "free", price: 0 } }))).toEqual([]);
+    expect(extractJsonLdEntities(ld({ "@type": "SoftwareApplication", name: "App", offers: [offer("Free", "0", "USD", "MON")] }))).toEqual([]);
+  });
+});
