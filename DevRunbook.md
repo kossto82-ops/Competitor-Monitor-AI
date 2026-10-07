@@ -120,7 +120,13 @@ not retried every tick: the wait doubles from 15 minutes up to 24 hours (`monito
 on the first success. It is relative to the URL's own `scanFrequencyMinutes`: the first retry waits at
 least a quarter of the cadence (at most 6 h), and the cap is never below the cadence. **Same-host spacing:**
 URLs of one site that are due on the same tick are enqueued 30 s apart plus up to 10 s of jitter
-(`CMA_SCHEDULER_HOST_SPACING_MS` / `CMA_SCHEDULER_HOST_JITTER_MS`). See
+(`CMA_SCHEDULER_HOST_SPACING_MS` / `CMA_SCHEDULER_HOST_JITTER_MS`).
+
+**Source health (Phase 29 B2).** Each monitored URL shows a derived state: Healthy, Failing (recent attempts
+failed, data still fresh), Stale (last success older than 3x its cadence, minimum 48 h), Paused, Not scanned
+yet, or Stopped automatically. The scheduler stops (pauses, keeping history) a source with 10+ consecutive
+failures and no success for 14 days (`CMA_SOURCE_DISABLE_MIN_FAILURES` / `CMA_SOURCE_DISABLE_AFTER_DAYS`);
+resuming it in the UI clears the stop and its failure streak. This pass only runs while the scheduler runs. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 

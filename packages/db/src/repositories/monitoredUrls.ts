@@ -133,8 +133,50 @@ export async function updateMonitoredUrl(organizationId: string, monitoredUrlId:
       ...(input.category !== undefined ? { category: input.category } : {}),
       ...(input.scanFrequencyMinutes !== undefined ? { scanFrequencyMinutes: input.scanFrequencyMinutes } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      // Resuming (also after an automatic stop) gives the source a clean slate: it is due again
+      // immediately instead of waiting out a backoff earned before the customer fixed it.
+      ...(input.isActive === true ? { disabledAt: null, disabledReason: null, consecutiveFailureCount: 0, lastAttemptAt: null } : {}),
     },
   });
+}
+
+export const AUTO_DISABLE_REASON = "AUTO_SUSTAINED_FAILURE";
+
+export interface AutoDisableOptions {
+  /** Days without a successful scan before a failing source is stopped. */
+  afterDays: number;
+  /** ...and at least this many consecutive failed attempts (so a long outage of our own is not blamed on the source). */
+  minConsecutiveFailures: number;
+}
+
+export const DEFAULT_AUTO_DISABLE: AutoDisableOptions = { afterDays: 14, minConsecutiveFailures: 10 };
+
+/**
+ * Phase 29 B2: stops monitoring sources that have been failing for a sustained period. Deliberately
+ * NOT tenant-scoped (scheduler entry point, like listDueMonitoredUrls). It deactivates - never
+ * deletes - so the history stays and the customer can resume with one click. Returns the sources
+ * it stopped so the caller can log them.
+ */
+export async function disableUnreachableSources(now: Date = new Date(), options: AutoDisableOptions = DEFAULT_AUTO_DISABLE) {
+  const cutoff = new Date(now.getTime() - options.afterDays * 24 * 60 * 60_000);
+  const candidates = await prisma.monitoredUrl.findMany({
+    where: {
+      isActive: true,
+      consecutiveFailureCount: { gte: options.minConsecutiveFailures },
+      OR: [
+        { lastSuccessfulScanAt: { lt: cutoff } },
+        { lastSuccessfulScanAt: null, createdAt: { lt: cutoff } },
+      ],
+    },
+    select: { id: true, organizationId: true, url: true, consecutiveFailureCount: true },
+  });
+  if (candidates.length === 0) return [];
+
+  await prisma.monitoredUrl.updateMany({
+    where: { id: { in: candidates.map((c) => c.id) }, isActive: true },
+    data: { isActive: false, disabledAt: now, disabledReason: AUTO_DISABLE_REASON },
+  });
+  return candidates;
 }
 
 /**

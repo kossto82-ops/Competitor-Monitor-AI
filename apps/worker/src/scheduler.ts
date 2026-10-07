@@ -1,4 +1,4 @@
-import { listDueMonitoredUrls, listOrganizationsForDailyReportScheduling } from "@cma/db";
+import { disableUnreachableSources, listDueMonitoredUrls, listOrganizationsForDailyReportScheduling, type AutoDisableOptions } from "@cma/db";
 import { createMonitoringQueue, createDailyReportQueue, createRedisConnection } from "@cma/queue";
 import { enqueueDueMonitoringJobs, type EnqueueAllDeps } from "./enqueueAll.js";
 import { enqueueDailyReportJobs, type EnqueueDailyReportsDeps } from "./enqueueDailyReports.js";
@@ -49,11 +49,28 @@ function readIntervalMs(envVar: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** CMA_SOURCE_DISABLE_AFTER_DAYS (default 14) and CMA_SOURCE_DISABLE_MIN_FAILURES (default 10). */
+export function readAutoDisableOptions(): AutoDisableOptions {
+  const positiveInt = (name: string, fallback: number) => {
+    const n = Number(process.env[name]);
+    return Number.isInteger(n) && n > 0 ? n : fallback;
+  };
+  return {
+    afterDays: positiveInt("CMA_SOURCE_DISABLE_AFTER_DAYS", 14),
+    minConsecutiveFailures: positiveInt("CMA_SOURCE_DISABLE_MIN_FAILURES", 10),
+  };
+}
+
 export interface SchedulerDeps {
   monitoring: EnqueueAllDeps;
   dailyReports: EnqueueDailyReportsDeps;
   monitoringIntervalMs: number;
   dailyReportIntervalMs: number;
+  /**
+   * Phase 29 B2: stops sources that have failed for weeks, before each enqueue pass. Optional so the
+   * one-shot enqueue path and existing tests are unaffected; a failure here never blocks monitoring.
+   */
+  disableUnreachableSources?: () => Promise<{ id: string; url: string }[]>;
   /** Injectable so tests can drive ticks deterministically without waiting on real timers. */
   setInterval: typeof setInterval;
   clearInterval: typeof clearInterval;
@@ -80,6 +97,7 @@ export function createDefaultSchedulerDeps(): { deps: SchedulerDeps; close: () =
       listOrganizationsForDailyReportScheduling,
       createDailyReportQueue: () => ({ add: dailyReportQueue.add.bind(dailyReportQueue), close: async () => undefined }),
     },
+    disableUnreachableSources: () => disableUnreachableSources(new Date(), readAutoDisableOptions()),
     monitoringIntervalMs: readIntervalMs("CMA_SCHEDULER_MONITORING_INTERVAL_MS", DEFAULT_MONITORING_INTERVAL_MS),
     dailyReportIntervalMs: readIntervalMs("CMA_SCHEDULER_DAILY_REPORT_INTERVAL_MS", DEFAULT_DAILY_REPORT_INTERVAL_MS),
     setInterval,
@@ -141,6 +159,16 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   const dailyReportRunning = { current: false };
 
   const runMonitoringTick = async () => {
+    if (deps.disableUnreachableSources) {
+      try {
+        const stopped = await deps.disableUnreachableSources();
+        for (const source of stopped) {
+          console.warn(`[scheduler] source stopped after sustained failures: ${source.id} (${source.url})`);
+        }
+      } catch (err) {
+        console.error("[scheduler] auto-disable pass failed (monitoring continues):", err);
+      }
+    }
     const result = await enqueueDueMonitoringJobs(deps.monitoring);
     console.log(
       `[scheduler] monitoring tick: ${result.enqueuedCount}/${result.candidateCount} due URL(s) enqueued (0 AI calls - monitoring never calls AI)`,

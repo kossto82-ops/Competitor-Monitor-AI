@@ -5,3 +5,4 @@ export * from "./reportWindow.js";
 export * from "./reportGrouping.js";
 export * from "./changeDescription.js";
 export * from "./period.js";
+export * from "./sourceHealth.js";

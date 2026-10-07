@@ -131,4 +131,25 @@ describe("startScheduler", () => {
     await handle.runDailyReportTickNow();
     expect(dailyReports.listOrganizationsForDailyReportScheduling).toHaveBeenCalledTimes(1);
   });
+
+  it("stops unreachable sources before enqueueing, and keeps monitoring if that pass fails", async () => {
+    const disable = vi.fn().mockResolvedValue([{ id: "url-9", url: "https://dead.test" }]);
+    const monitoring = makeMonitoringDeps([{ id: "url-1", organizationId: "org-1" }]);
+    const { deps } = makeSchedulerDeps({ monitoring, disableUnreachableSources: disable });
+    const handle = startScheduler(deps);
+    await flush();
+    expect(disable).toHaveBeenCalledTimes(1);
+    expect(monitoring.listDueMonitoredUrls).toHaveBeenCalled();
+
+    const failing = vi.fn().mockRejectedValue(new Error("db down"));
+    const second = makeMonitoringDeps([{ id: "url-2", organizationId: "org-1" }]);
+    const { deps: deps2 } = makeSchedulerDeps({ monitoring: second, disableUnreachableSources: failing });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const handle2 = startScheduler(deps2);
+    await flush();
+    expect(second.listDueMonitoredUrls).toHaveBeenCalled();
+    errors.mockRestore();
+    handle.stop();
+    handle2.stop();
+  });
 });

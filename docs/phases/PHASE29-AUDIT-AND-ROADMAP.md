@@ -129,9 +129,9 @@ Tests: corpus de comportamientos reales (403, 429, redirecciones), resiliencia (
 | Parte | Contenido | Errores |
 |---|---|---|
 | B1 ✅ | Hecho: el backoff de fallos es relativo a `scanFrequencyMinutes` (`monitoringBackoffMs(n, frecuencia)`: suelo = min(frecuencia/4, 6 h), tope = max(24 h, frecuencia); una URL diaria ya no se reintenta a los 15 min). Espaciado por host: las URLs del mismo sitio que vencen en el mismo tick se encolan con `delay` creciente (`CMA_SCHEDULER_HOST_SPACING_MS`, 30 s) más jitter (`CMA_SCHEDULER_HOST_JITTER_MS`, 10 s), máximo 10 min; hosts distintos no se retrasan entre sí. **Límite:** el espaciado actúa dentro de un tick; no hay límite global de peticiones por host entre ticks ni entre ejecuciones manuales | E14 (parcial) |
-| B2 | Estados de salud de la fuente (`HEALTHY/DEGRADED/STALE/DISABLED`) derivados de fallos y antigüedad, migración, desactivación automática tras N días sin éxito, aviso al cliente | E14 |
+| B2 ✅ | Hecho: estado de salud derivado y explicable (`deriveSourceHealth` en `@cma/core`: `HEALTHY/DEGRADED/STALE/PENDING/PAUSED/DISABLED`; STALE = último éxito más viejo que 3x la frecuencia y al menos 48 h, y gana sobre DEGRADED), insignia con el motivo en la lista de URLs del competidor, columnas `disabledAt/disabledReason` (migración `20261007000000_phase29_source_health`), parada automática (`disableUnreachableSources`: >=10 fallos seguidos y 14 días sin éxito, configurable con `CMA_SOURCE_DISABLE_*`; desactiva, no borra) ejecutada en cada tick del scheduler sin bloquear el monitoreo si falla; reanudar limpia la parada y la racha de fallos. **No hecho (pasa a B4):** el aviso al cliente por email/alerta; hoy solo se ve la insignia y el log del scheduler. **Límite:** la parada automática solo corre mientras el scheduler está en marcha, y no se ha visto la insignia en el navegador (la BD local solo tiene datos de prueba) | E14 |
 | B3 | Endurecer la extracción: límite de tamaño y content-type antes de parsear, `ETag`/`If-Modified-Since`, robots.txt | E30, E26 (parcial) |
-| B4 | Sweeper de filas de IA en `RUNNING` huérfanas, panel de salud de fuentes y alerta de fuente caída | E24 |
+| B4 | Sweeper de filas de IA en `RUNNING` huérfanas, panel de salud de fuentes, y aviso al cliente (alerta de fuente caída/parada automática) | E24 |
 
 ### Fase C — Calidad de detección (3-4 semanas)
 

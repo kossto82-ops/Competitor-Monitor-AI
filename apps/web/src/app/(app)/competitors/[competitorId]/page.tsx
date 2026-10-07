@@ -19,6 +19,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { AddUrlForm } from "@/components/app/AddUrlForm";
 import { ScanButton } from "@/components/app/ScanButton";
 import { CompetitorActions } from "@/components/app/CompetitorActions";
+import { SourceHealthBadge } from "@/components/app/SourceHealthBadge";
 import { MonitoredUrlActions } from "@/components/app/MonitoredUrlActions";
 import { ActivityMetricsCard } from "@/components/app/ActivityMetricsCard";
 import { PriceHistoryCard } from "@/components/app/PriceHistoryCard";
@@ -254,7 +255,7 @@ export default async function CompetitorDetailPage({ params, searchParams }: Pag
                     <div className="flex items-center gap-2">
                       <p className="truncate text-sm font-medium text-slate-900">{url.label ?? url.url}</p>
                       <Badge tone="gray">{url.category.replace("_", " ").toLowerCase()}</Badge>
-                      {!url.isActive ? <Badge tone="amber">Paused</Badge> : null}
+                      <SourceHealthBadge source={url} />
                     </div>
                     <p className="truncate text-xs text-slate-400">{url.url}</p>
                     <MonitoringStatusLine url={url} />

@@ -5,7 +5,9 @@ import { createCompetitor } from "./competitors.js";
 import { ConflictError, NotFoundError } from "./errors.js";
 import {
   createMonitoredUrl,
+  AUTO_DISABLE_REASON,
   deleteMonitoredUrlIfSafe,
+  disableUnreachableSources,
   getMonitoredUrlForOrg,
   listDueMonitoredUrls,
   monitoringBackoffMs,
@@ -211,6 +213,58 @@ describe.skipIf(!reachable)("monitoredUrls repository (Phase 5)", () => {
       });
       const dueAfter = await listDueMonitoredUrls();
       expect(dueAfter.map((u) => u.id)).toContain(url.id);
+    });
+  });
+
+  describe("disableUnreachableSources (Phase 29 B2)", () => {
+    const day = 24 * 60 * 60_000;
+
+    async function makeFailingUrl(slug: string, data: Record<string, unknown>) {
+      const { organization, competitor } = await makeOrgWithCompetitor(slug);
+      const url = await createMonitoredUrl(organization.id, competitor.id, { url: `https://${slug}.example.test/pricing`, category: "GENERAL" });
+      await prisma.monitoredUrl.update({ where: { id: url.id }, data });
+      return { organization, url };
+    }
+
+    it("stops a source that has failed for 14+ days with 10+ consecutive failures, keeping it and its history", async () => {
+      const { url } = await makeFailingUrl("autodis-yes", { consecutiveFailureCount: 12, lastSuccessfulScanAt: new Date(Date.now() - 20 * day) });
+      const stopped = await disableUnreachableSources();
+      expect(stopped.map((u) => u.id)).toContain(url.id);
+
+      const after = await prisma.monitoredUrl.findUniqueOrThrow({ where: { id: url.id } });
+      expect(after.isActive).toBe(false);
+      expect(after.disabledAt).not.toBeNull();
+      expect(after.disabledReason).toBe(AUTO_DISABLE_REASON);
+    });
+
+    it("also stops a source that never succeeded once it is old enough", async () => {
+      const { url } = await makeFailingUrl("autodis-never", { consecutiveFailureCount: 15, createdAt: new Date(Date.now() - 30 * day) });
+      expect((await disableUnreachableSources()).map((u) => u.id)).toContain(url.id);
+    });
+
+    it("leaves alone a source with few failures, a recent success, or that is already paused", async () => {
+      const fewFailures = await makeFailingUrl("autodis-few", { consecutiveFailureCount: 3, lastSuccessfulScanAt: new Date(Date.now() - 20 * day) });
+      const recentSuccess = await makeFailingUrl("autodis-recent", { consecutiveFailureCount: 12, lastSuccessfulScanAt: new Date(Date.now() - 2 * day) });
+      const paused = await makeFailingUrl("autodis-paused", { consecutiveFailureCount: 12, isActive: false, lastSuccessfulScanAt: new Date(Date.now() - 20 * day) });
+
+      const ids = (await disableUnreachableSources()).map((u) => u.id);
+      expect(ids).not.toContain(fewFailures.url.id);
+      expect(ids).not.toContain(recentSuccess.url.id);
+      expect(ids).not.toContain(paused.url.id);
+      const pausedAfter = await prisma.monitoredUrl.findUniqueOrThrow({ where: { id: paused.url.id } });
+      expect(pausedAfter.disabledAt).toBeNull();
+    });
+
+    it("resuming clears the automatic stop and the failure streak so the source is due again", async () => {
+      const { organization, url } = await makeFailingUrl("autodis-resume", { consecutiveFailureCount: 12, lastSuccessfulScanAt: new Date(Date.now() - 20 * day) });
+      await disableUnreachableSources();
+
+      const resumed = await updateMonitoredUrl(organization.id, url.id, { isActive: true });
+      expect(resumed.isActive).toBe(true);
+      expect(resumed.disabledAt).toBeNull();
+      expect(resumed.disabledReason).toBeNull();
+      expect(resumed.consecutiveFailureCount).toBe(0);
+      expect((await listDueMonitoredUrls()).map((u) => u.id)).toContain(url.id);
     });
   });
 

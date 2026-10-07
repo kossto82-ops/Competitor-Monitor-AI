@@ -227,6 +227,10 @@ model MonitoredUrl {
   // lastSuccessfulScanAt, so without this anchor a failing URL is "due"
   // forever and gets re-enqueued every scheduler tick).
   lastAttemptAt           DateTime?
+  // Phase 29 B2: set when the system (not the customer) stopped monitoring this URL after
+  // sustained failure; isActive is false at the same time. Cleared when the customer resumes it.
+  disabledAt              DateTime?
+  disabledReason          String?
   createdAt               DateTime    @default(now())
   updatedAt               DateTime    @updatedAt
 
