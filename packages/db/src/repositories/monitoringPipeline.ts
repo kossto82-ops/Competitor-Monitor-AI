@@ -96,6 +96,8 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
         confidence: extraction.confidence,
         warnings: extraction.warnings,
         extractorVersion: extraction.extractorVersion ?? 1,
+        requestedLocale: extraction.requestedLocale ?? null,
+        pageLanguage: extraction.pageLanguage ?? null,
         extractedEntities: {
           create: extraction.extractedEntities.map((entity) => ({
             organizationId,

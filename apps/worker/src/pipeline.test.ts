@@ -36,6 +36,7 @@ function makeDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
     persistMonitoringResult: vi.fn().mockResolvedValue(undefined),
     persistNotModifiedResult: vi.fn().mockResolvedValue(undefined),
     listRecentChangeEventsForUrl: vi.fn().mockResolvedValue([]),
+    getOrganizationMarketLocale: vi.fn().mockResolvedValue(null),
     ...overrides,
   };
 }
@@ -241,6 +242,7 @@ describe("runMonitoringJob", () => {
       await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
       expect(extract).toHaveBeenCalledWith({
         url: "https://competitor.test/pricing",
+        locale: null,
         conditional: { etag: '"abc"', lastModified: "Wed, 01 Oct 2026 10:00:00 GMT" },
       });
     });
@@ -256,19 +258,19 @@ describe("runMonitoringJob", () => {
     it("always does a full fetch for a manual scan (the payload carries a job id)", async () => {
       const { deps, extract } = conditionalDeps(withValidators());
       await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1", monitoringJobId: "pending-job-1" }, deps);
-      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
+      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing", locale: null });
     });
 
     it("does a full fetch when the verified snapshot came from an older extractor, so the new baseline is taken first", async () => {
       const { deps, extract } = conditionalDeps(withValidators(), {}, { ...priorSnapshot, extractorVersion: 1 });
       await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
-      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
+      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing", locale: null });
     });
 
     it("treats a snapshot with no recorded version as version 1 (it predates the column)", async () => {
       const { deps, extract } = conditionalDeps(withValidators(), {}, { ...priorSnapshot, extractorVersion: undefined });
       await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
-      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
+      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing", locale: null });
     });
 
     it("does a full fetch when there is no verified snapshot, no validators, or they are too old", async () => {
@@ -280,7 +282,7 @@ describe("runMonitoringJob", () => {
       ] as const) {
         const { deps, extract } = conditionalDeps(url, {}, prior);
         await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
-        expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing" });
+        expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing", locale: null });
       }
     });
   });
@@ -326,6 +328,48 @@ describe("runMonitoringJob", () => {
       });
       await expect(runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, failing)).resolves.toBeDefined();
       expect(failing.persistMonitoringResult).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("market setting (Phase 29)", () => {
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+    const url = { id: "url-1", organizationId: "org-1", url: "https://competitor.test/pricing", etag: '"abc"', lastModifiedHeader: null, validatorsSetAt: hoursAgo(1) };
+    const snapshot = (requestedLocale: string | null) => ({ id: "snap-1", extractorVersion: EXTRACTOR_VERSION, requestedLocale, contentHash: "h", structuredDataHash: "s", normalizedContent: "x", extractedEntities: [] });
+
+    it("requests the page in the organization's market", async () => {
+      const extract = vi.fn().mockResolvedValue(extractionResult());
+      const deps = makeDeps({ extractor: { extract }, getOrganizationMarketLocale: vi.fn().mockResolvedValue("de-DE") });
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing", locale: "de-DE" });
+      expect(deps.getOrganizationMarketLocale).toHaveBeenCalledWith("org-1");
+    });
+
+    it("never answers with a 304 for a snapshot read in a different market, but does when the market is the same", async () => {
+      for (const [prior, locale, conditional] of [
+        ["en-US", "en-US", true],
+        [null, "en-US", false],
+        ["en-US", "es-ES", false],
+        ["en-US", null, false],
+        [null, null, true],
+      ] as const) {
+        const extract = vi.fn().mockResolvedValue(extractionResult());
+        const deps = makeDeps({
+          extractor: { extract },
+          getMonitoredUrlForOrg: vi.fn().mockResolvedValue(url),
+          getLatestVerifiedSnapshot: vi.fn().mockResolvedValue(snapshot(prior)),
+          getOrganizationMarketLocale: vi.fn().mockResolvedValue(locale),
+        });
+        await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+        const call = extract.mock.calls[0]![0] as { conditional?: unknown };
+        expect(Boolean(call.conditional), `${prior} -> ${locale}`).toBe(conditional);
+      }
+    });
+
+    it("falls back to no market when the setting cannot be read, instead of failing the scan", async () => {
+      const extract = vi.fn().mockResolvedValue(extractionResult());
+      const deps = makeDeps({ extractor: { extract }, getOrganizationMarketLocale: vi.fn().mockRejectedValue(new Error("db down")) });
+      await expect(runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps)).resolves.toBeDefined();
+      expect(extract).toHaveBeenCalledWith({ url: "https://competitor.test/pricing", locale: null });
     });
   });
 });

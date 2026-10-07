@@ -524,4 +524,47 @@ describe("compareSnapshots - promotion added/changed/removed", () => {
       expect(events.filter((e) => e.changeType === "PRODUCT_ADDED" && e.entityKey === "plan:team:month")).toHaveLength(1);
     });
   });
+
+  describe("market (Phase 29)", () => {
+    const usd = (key: string, value: string) => priceEntity({ key, value, currency: "USD" });
+    const inr = (key: string, value: string) => priceEntity({ key, value, currency: "INR" });
+    const compare = (prior: Partial<PriorSnapshotData>, current: Partial<CurrentExtractionData>) =>
+      compareSnapshots(makePrior(prior), makeCurrent({ contentHash: "hash-b", structuredDataHash: "struct-b", ...current }));
+
+    it("treats a change of the market setting as a new baseline, not as every price changing", () => {
+      const result = compare(
+        { requestedLocale: null, entities: [usd("plan:pro:month", "29.00")] },
+        { requestedLocale: "es-ES", entities: [priceEntity({ key: "plan:pro:month", value: "27.00", currency: "EUR" })] },
+      );
+      expect(result.verificationState).toBe("NO_CHANGE");
+      expect(result.changeEvents).toEqual([]);
+      expect(result.reason).toContain("market setting changed (none -> es-ES)");
+    });
+
+    it("compares normally when both scans were requested in the same market, or the market is unknown to the caller", () => {
+      const same = compare({ requestedLocale: "en-US", entities: [usd("plan:pro:month", "29.00")] }, { requestedLocale: "en-US", entities: [usd("plan:pro:month", "39.00")] });
+      expect(same.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(true);
+      const unknown = compare({ entities: [usd("plan:pro:month", "29.00")] }, { entities: [usd("plan:pro:month", "39.00")] });
+      expect(unknown.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(true);
+    });
+
+    it("recognises a whole page switching currency at once (the server address moved) as a new baseline", () => {
+      const result = compare(
+        { entities: [usd("plan:a:month", "10.00"), usd("plan:b:month", "20.00"), usd("plan:c:month", "30.00")] },
+        { entities: [inr("plan:a:month", "830.00"), inr("plan:b:month", "1660.00"), inr("plan:c:month", "2490.00")] },
+      );
+      expect(result.verificationState).toBe("NO_CHANGE");
+      expect(result.reason).toContain("USD -> INR");
+    });
+
+    it("still reports a currency change that affects only some prices, or a single price", () => {
+      const some = compare(
+        { entities: [usd("plan:a:month", "10.00"), usd("plan:b:month", "20.00")] },
+        { entities: [inr("plan:a:month", "830.00"), usd("plan:b:month", "20.00")] },
+      );
+      expect(some.changeEvents.some((e) => e.changeType === "PRICE_CHANGE" && e.evidenceExcerpt.includes("currency changed"))).toBe(true);
+      const one = compare({ entities: [usd("plan:a:month", "10.00")] }, { entities: [inr("plan:a:month", "830.00")] });
+      expect(one.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(true);
+    });
+  });
 });

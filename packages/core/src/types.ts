@@ -48,6 +48,10 @@ export interface ExtractionResult {
    * so the detector treats a version change as a new baseline instead of as a page change.
    */
   extractorVersion?: number;
+  /** The market (Accept-Language locale) this page was requested in; null when the customer set none. */
+  requestedLocale?: string | null;
+  /** The language the page declares for itself (<html lang>), lowercased; null when it declares none. */
+  pageLanguage?: string | null;
   /** Cache validators of a successful full response, stored so the next scan can be conditional. */
   validators?: ConditionalValidators;
 }

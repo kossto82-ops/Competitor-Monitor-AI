@@ -169,4 +169,28 @@ describe("CheerioExtractor", () => {
     const result = await new CheerioExtractor(fetchFn).extract({ url: "https://a.test/pricing" });
     expect(result.validators).toEqual({ etag: '"v2"', lastModified: null });
   });
+
+  it("requests the page in the customer's market and records the market and the page's own language", async () => {
+    let seenOptions: unknown;
+    const fetchFn: FetchFn = async (_url, _conditional, options) => {
+      seenOptions = options;
+      return { status: 200, finalUrl: "https://a.test/precios", body: `<html lang="es_ES"><body><p>${FILLER}</p></body></html>` };
+    };
+    const result = await new CheerioExtractor(fetchFn).extract({ url: "https://a.test/precios", locale: "es-ES" });
+    expect(seenOptions).toEqual({ acceptLanguage: "es-ES,es;q=0.9,en;q=0.5" });
+    expect(result.requestedLocale).toBe("es-ES");
+    expect(result.pageLanguage).toBe("es-es");
+  });
+
+  it("sends no language preference and records null when the customer set no market", async () => {
+    let seenOptions: unknown;
+    const fetchFn: FetchFn = async (_url, _conditional, options) => {
+      seenOptions = options;
+      return { status: 200, finalUrl: "https://a.test/", body: `<html><body><p>${FILLER}</p></body></html>` };
+    };
+    const result = await new CheerioExtractor(fetchFn).extract({ url: "https://a.test/" });
+    expect(seenOptions).toEqual({ acceptLanguage: null });
+    expect(result.requestedLocale).toBeNull();
+    expect(result.pageLanguage).toBeNull();
+  });
 });

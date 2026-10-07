@@ -14,6 +14,7 @@ import {
 } from "./structuredData.js";
 import { extractPricingPlans, planToEntity } from "./pricingPlans.js";
 import { extractHtmlPromotionEntities, mergeHtmlPromotionsWithJsonLd } from "./htmlPromotions.js";
+import { acceptLanguageFor } from "@cma/core";
 import type { ConditionalRequest, Extractor, FetchFn } from "./types.js";
 import type { RobotsChecker } from "./robots.js";
 
@@ -37,6 +38,12 @@ export function structuredDataHashOf(entities: ExtractedEntity[]): string | null
   return facts.length > 0 ? sha256(JSON.stringify(facts)) : null;
 }
 
+/** The language the page declares for itself: `<html lang="es-ES">` -> "es-es". Null when it declares none. */
+export function pageLanguageOf($: cheerio.CheerioAPI): string | null {
+  const lang = ($("html").attr("lang") ?? "").trim().toLowerCase();
+  return /^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$/.test(lang) ? lang.replace("_", "-") : null;
+}
+
 export class CheerioExtractor implements Extractor {
   readonly method = "CHEERIO" as const;
 
@@ -49,14 +56,14 @@ export class CheerioExtractor implements Extractor {
     private readonly robots?: Pick<RobotsChecker, "isAllowed">,
   ) {}
 
-  async extract({ url, conditional }: { url: string; conditional?: ConditionalRequest }): Promise<ExtractionResult> {
+  async extract({ url, conditional, locale }: { url: string; conditional?: ConditionalRequest; locale?: string | null }): Promise<ExtractionResult> {
     const start = Date.now();
     try {
       if (this.robots && !(await this.robots.isAllowed(url))) {
         return this.failure(url, null, null, "This page is disallowed for automated access by the site's robots.txt.", Date.now() - start);
       }
       const hasValidators = Boolean(conditional && (conditional.etag || conditional.lastModified));
-      const page = await this.fetchFn(url, hasValidators ? conditional : undefined);
+      const page = await this.fetchFn(url, hasValidators ? conditional : undefined, { acceptLanguage: acceptLanguageFor(locale) });
       const durationMs = Date.now() - start;
 
       // 304 is only meaningful because WE asked conditionally; without validators it stays an error.
@@ -143,6 +150,8 @@ export class CheerioExtractor implements Extractor {
         warnings,
         durationMs,
         extractorVersion: EXTRACTOR_VERSION,
+        requestedLocale: locale ?? null,
+        pageLanguage: pageLanguageOf($),
         ...(page.headers && (page.headers.etag || page.headers.lastModified) ? { validators: page.headers } : {}),
       };
     } catch (err) {

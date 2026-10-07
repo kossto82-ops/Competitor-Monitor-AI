@@ -1,6 +1,7 @@
 import { getOrganizationById, getUserForOrg } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { MarketSettingsForm } from "@/components/app/MarketSettingsForm";
 
 export default async function AccountSettingsPage() {
   const session = await getSession();
@@ -31,6 +32,8 @@ export default async function AccountSettingsPage() {
           </dl>
         </CardContent>
       </Card>
+
+      <MarketSettingsForm initialLocale={organization?.marketLocale ?? null} />
 
       <Card>
         <CardHeader>

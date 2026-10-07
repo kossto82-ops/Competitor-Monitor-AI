@@ -42,6 +42,8 @@ interface PriorSnapshotLike {
   id: string;
   /** Missing on rows from before Phase 29 C2; those were produced by version 1. */
   extractorVersion?: number;
+  /** The market the snapshot was requested in; null/absent = none. */
+  requestedLocale?: string | null;
   contentHash: string | null;
   structuredDataHash: string | null;
   normalizedContent: string;
@@ -63,6 +65,8 @@ interface PriorSnapshotLike {
  * @cma/extraction implementations.
  */
 export interface PipelineDeps {
+  /** The organization's market setting (Accept-Language locale), or null when none is set. */
+  getOrganizationMarketLocale: (organizationId: string) => Promise<string | null>;
   /** Changes recorded for this URL recently, to recognise a value that flips back (Phase 29 C4). */
   listRecentChangeEventsForUrl: (organizationId: string, monitoredUrlId: string, sinceMs: number) => Promise<RecentChangeEvent[]>;
   persistNotModifiedResult: (
@@ -102,6 +106,7 @@ export function createDefaultPipelineDeps(): PipelineDeps {
     markMonitoringJobRunning: db.markMonitoringJobRunning,
     markMonitoringJobFailed: db.markMonitoringJobFailed,
     persistMonitoringResult: db.persistMonitoringResult,
+    getOrganizationMarketLocale: async (organizationId) => (await db.getOrganizationById(organizationId))?.marketLocale ?? null,
     listRecentChangeEventsForUrl: (organizationId, monitoredUrlId, sinceMs) => db.listRecentChangeEventsForUrl(organizationId, monitoredUrlId, sinceMs),
     persistNotModifiedResult: db.persistNotModifiedResult,
   };
@@ -153,6 +158,7 @@ export async function runMonitoringJob(
     const prior: PriorSnapshotData | null = priorSnapshot
       ? {
           extractorVersion: priorSnapshot.extractorVersion ?? 1,
+          requestedLocale: priorSnapshot.requestedLocale ?? null,
           contentHash: priorSnapshot.contentHash,
           structuredDataHash: priorSnapshot.structuredDataHash,
           normalizedContent: priorSnapshot.normalizedContent,
@@ -163,6 +169,10 @@ export async function runMonitoringJob(
     // Conditional request (Phase 29 B3b): only when there is a verified snapshot to fall back on,
     // the validators are fresh enough, and this is a scheduled scan - a customer who clicks "Scan
     // now" (the payload carries the job id the API created) always gets a full fetch.
+    // The market is part of what a 304 vouches for: validators from a page read in another market say
+    // nothing about this one. Looked up once per scan, and a failure to read it falls back to "no market".
+    const locale = await deps.getOrganizationMarketLocale(monitoredUrl.organizationId).catch(() => null);
+
     const validatorsFresh =
       monitoredUrl.validatorsSetAt != null && Date.now() - monitoredUrl.validatorsSetAt.getTime() < conditionalMaxAgeMs();
     const useConditional =
@@ -171,10 +181,12 @@ export async function runMonitoringJob(
       // A 304 writes no snapshot, so it must never answer for a snapshot from an older extractor: the
       // new baseline has to be taken with a full fetch first.
       (priorSnapshot.extractorVersion ?? 1) === EXTRACTOR_VERSION &&
+      (priorSnapshot.requestedLocale ?? null) === locale &&
       validatorsFresh && Boolean(monitoredUrl.etag || monitoredUrl.lastModifiedHeader);
 
     const extraction = await deps.extractor.extract({
       url: monitoredUrl.url,
+      locale,
       ...(useConditional ? { conditional: { etag: monitoredUrl.etag ?? null, lastModified: monitoredUrl.lastModifiedHeader ?? null } } : {}),
     });
 
@@ -200,6 +212,7 @@ export async function runMonitoringJob(
       prior,
       {
       extractorVersion: extraction.extractorVersion,
+      requestedLocale: extraction.requestedLocale ?? null,
       confidence: extraction.confidence,
       httpStatus: extraction.httpStatus,
       errorMessage: extraction.errorMessage,

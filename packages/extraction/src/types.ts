@@ -21,9 +21,14 @@ export interface ConditionalRequest {
  * canned HTML, so extraction logic is verified without a network call
  * and without needing to defeat the SSRF allowlist.
  */
-export type FetchFn = (url: string, conditional?: ConditionalRequest) => Promise<FetchedPage>;
+export interface FetchOptions {
+  /** Accept-Language header value for this request, or null/absent to send none. */
+  acceptLanguage?: string | null;
+}
+
+export type FetchFn = (url: string, conditional?: ConditionalRequest, options?: FetchOptions) => Promise<FetchedPage>;
 
 export interface Extractor {
   readonly method: ExtractionMethod;
-  extract(input: { url: string; conditional?: ConditionalRequest }): Promise<ExtractionResult>;
+  extract(input: { url: string; conditional?: ConditionalRequest; locale?: string | null }): Promise<ExtractionResult>;
 }

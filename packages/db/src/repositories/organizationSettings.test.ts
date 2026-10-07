@@ -47,6 +47,17 @@ describe.skipIf(!reachable)("organization settings & usage (Phase 5)", () => {
     expect(updated.dailyReportEnabled).toBe(false);
   });
 
+  it("market setting: stores a locale, clears it with an empty string, and never leaks to another organization", async () => {
+    const a = await makeOrg("market-a");
+    const b = await makeOrg("market-b");
+    expect(a.marketLocale).toBeNull();
+
+    expect((await updateOrganizationSettings(a.id, { marketLocale: "es-ES" })).marketLocale).toBe("es-ES");
+    expect((await updateOrganizationSettings(a.id, { timezone: "UTC" })).marketLocale).toBe("es-ES"); // untouched by other edits
+    expect((await prisma.organization.findUniqueOrThrow({ where: { id: b.id } })).marketLocale).toBeNull();
+    expect((await updateOrganizationSettings(a.id, { marketLocale: "" })).marketLocale).toBeNull();
+  });
+
   it("Section 18: getReportRecipientEmailForOrg falls back to the OWNER's email when no override is set", async () => {
     const org = await makeOrg("recipient-default");
     const recipient = await getReportRecipientEmailForOrg(org.id);

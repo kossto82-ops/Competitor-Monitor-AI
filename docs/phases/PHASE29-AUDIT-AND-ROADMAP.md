@@ -172,6 +172,15 @@ Cambios que salieron de esta prueba: (1) ofertas con nombre propio en JSON-LD de
 - **Los precios con configurador (Klaviyo) y los promocionales (Mailchimp: "Save 50% ... for 12 months") no se pueden reducir a un precio de plan estable;** se leen tal como la página los muestra por defecto y eso queda documentado, no resuelto.
 - **Una misma web sirve variantes distintas por petición** (Klaviyo mostró dos maquetaciones distintas en minutos): refuerza la bajada de severidad de oscilaciones de C4.
 
+### Ajuste de mercado (paso 2 de la prueba con webs reales)
+
+El monitor ahora pide cada página en el **mercado** que elige la organización (Ajustes -> Account -> "Monitoring market": 16 idiomas/regiones, o "sin preferencia" que es el comportamiento anterior). Se envía como `Accept-Language` en cada petición (`es-ES` -> `es-ES,es;q=0.9,en;q=0.5`); la lista es cerrada porque el valor acaba en una cabecera HTTP y se vuelve a validar al enviarlo. Cada snapshot guarda el mercado pedido y el idioma que la página declara (`<html lang>`). Migración `20261007040000_phase29_market_locale` (columnas nulas, aditiva).
+
+- **Cambiar el mercado no genera falsos cambios:** dos snapshots pedidos en mercados distintos no son comparables, así que el primer escaneo tras el cambio es una línea base (el detector lo dice con el motivo, igual que un cambio de versión del extractor) y un 304 nunca responde por un snapshot de otro mercado.
+- **Un cambio de moneda masivo tampoco:** si todos los precios compartidos cambian a la vez a la misma moneda nueva (p. ej. el servidor cambia de ubicación y la web responde en otra moneda), es una línea base y no decenas de `PRICE_CHANGE`. Un precio suelto que cambia de moneda sigue siendo un cambio real.
+- **Comprobado con webs reales:** mozilla.org sigue el idioma pedido (sin preferencia -> `/`, `es-ES` -> `/es-ES/`, `de-DE` -> `/de/`). **zoho.com no lo hace:** responde con rupias y las mismas páginas cualquiera que sea el idioma, porque decide la moneda por la dirección IP del servidor.
+- **Límite que no se puede resolver con una cabecera y la interfaz lo dice:** el idioma no fija el **país**. Para ver los precios de un país concreto en sitios que deciden por IP haría falta salir a internet desde ese país (un proxy por país), que no existe todavía y no se promete.
+
 ### Fase D — Signals y priorización explicable (2-3 semanas)
 
 Tablas `Entity/EntityVersion`, `Signal/SignalEvidence` (promoción solo por reglas sobre eventos verificados), prioridad explicable (magnitud, recencia, frecuencia, nº de competidores, categoría estratégica elegida por el cliente, relevancia del competidor, significancia histórica; desglose por factor, pesos configurables y versionados; **importance** separada de **confidence**), alertas con niveles definidos por reglas observables, deduplicación y explicación obligatoria, primer dashboard "qué debes saber hoy". Errores: E27, E28, E16 (sesión), E33.

@@ -42,6 +42,11 @@ describe("requestViaIp (HTTP mechanics against a local test server)", () => {
         res.end("x".repeat(1000));
         return;
       }
+      if (req.url === "/echo-language") {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(`lang=${String(req.headers["accept-language"] ?? "none")}`);
+        return;
+      }
       if (req.url === "/conditional") {
         const etag = '"v1"';
         if (req.headers["if-none-match"] === etag) {
@@ -133,6 +138,15 @@ describe("requestViaIp (HTTP mechanics against a local test server)", () => {
 
     const changed = await requestViaIp(url, "127.0.0.1", { ...opts, conditional: { etag: '"stale"', lastModified: null } });
     expect(changed.status).toBe(200);
+  });
+
+  it("sends Accept-Language only when given a well-formed value", async () => {
+    const url = new URL(`http://127.0.0.1:${port}/echo-language`);
+    expect((await requestViaIp(url, "127.0.0.1", opts)).body).toBe("lang=none");
+    expect((await requestViaIp(url, "127.0.0.1", { ...opts, acceptLanguage: "es-ES,es;q=0.9,en;q=0.5" })).body).toBe("lang=es-ES,es;q=0.9,en;q=0.5");
+    // Anything that is not a plain language list is dropped instead of reaching the wire.
+    expect((await requestViaIp(url, "127.0.0.1", { ...opts, acceptLanguage: "es\r\nX-Evil: 1" })).body).toBe("lang=none");
+    expect((await requestViaIp(url, "127.0.0.1", { ...opts, acceptLanguage: "<script>" })).body).toBe("lang=none");
   });
 
   it("does not filter content types when allowedContentTypes is not set (other callers unaffected)", async () => {

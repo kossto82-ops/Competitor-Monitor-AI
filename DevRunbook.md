@@ -169,7 +169,12 @@ source's health and never produces added/removed events.
 **Identity and data integrity (Phase 29 C5).** A plan that vanishes under one name while another appears with the
 same price, currency and billing period is flagged on both events as a probable rename (never merged, never guessed
 when ambiguous). Entity keys are unique per scan (`#2`, `#3` for repeats) and a snapshot holds at most one event per
-type and field (enforced by a unique index). Tenant-owned rows carry `organizationId` everywhere, including extracted
+type and field (enforced by a unique index).
+
+**Monitoring market (Phase 29).** Settings -> Account -> "Monitoring market" sets the language requested from every
+competitor site (`Accept-Language`). Changing it makes the next scan of each page a new baseline. It does not
+choose a country: sites that pick the currency from the monitoring server's IP (Zoho answers in rupees from some
+locations) will keep doing so; the setting only affects sites that adapt to the requested language. Tenant-owned rows carry `organizationId` everywhere, including extracted
 entities, and user-driven edits/deletes are single atomic statements scoped by organization. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.

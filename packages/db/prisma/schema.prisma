@@ -147,6 +147,9 @@ model Organization {
   // this organization at all. Deliberately a single boolean, not a cron
   // expression - Section 11 asks for the minimum scheduling necessary.
   dailyReportEnabled Boolean @default(true)
+  // Phase 29: the market (Accept-Language locale from @cma/core market.ts) competitors' pages are read in.
+  // Null = send no preference and take whatever each site serves by default.
+  marketLocale String?
   // Phase 5 (Section 18): optional override recipient for the daily
   // report email. NULL (the default) means "use the organization's OWNER
   // user's email", exactly Phase 4's original behavior - see
@@ -295,6 +298,10 @@ model Snapshot {
   // Phase 29 C2: version of the extraction logic that produced the text/hashes above. Rows from
   // before this column were produced by version 1 (whole-body text).
   extractorVersion   Int     @default(1)
+  // Phase 29: the market this page was requested in, and the language it declared. Two snapshots read in
+  // different markets are not comparable (prices, currency and wording differ), like different extractors.
+  requestedLocale    String?
+  pageLanguage       String?
 
   extractedEntities      ExtractedEntity[]
   changeEventsAsCurrent  ChangeEvent[]     @relation("CurrentSnapshot")

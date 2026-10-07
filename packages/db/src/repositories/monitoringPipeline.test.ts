@@ -108,6 +108,30 @@ describe.skipIf(!reachable)("monitoring pipeline persistence (Phase 29 B3b)", ()
     expect(rows.map((x) => x.extractorVersion)).toEqual([2, 1]);
   });
 
+  it("records the market a snapshot was requested in and the language the page declared", async () => {
+    const { organization, url } = await makeUrl();
+    const job = await createRunningMonitoringJob(organization.id, url.id);
+    await persistMonitoringResult(job.id, {
+      organizationId: organization.id,
+      monitoredUrlId: url.id,
+      previousSnapshotId: null,
+      extraction: extraction({ requestedLocale: "es-ES", pageLanguage: "es-es" }),
+      comparison: comparison("NO_CHANGE"),
+      usage,
+    });
+    const job2 = await createRunningMonitoringJob(organization.id, url.id);
+    await persistMonitoringResult(job2.id, {
+      organizationId: organization.id,
+      monitoredUrlId: url.id,
+      previousSnapshotId: null,
+      extraction: extraction(),
+      comparison: comparison("NO_CHANGE"),
+      usage,
+    });
+    const rows = await prisma.snapshot.findMany({ where: { monitoredUrlId: url.id }, orderBy: { fetchedAt: "asc" } });
+    expect(rows.map((r) => [r.requestedLocale, r.pageLanguage])).toEqual([["es-ES", "es-es"], [null, null]]);
+  });
+
   it("clears the validators after a failed scan, so the next scan is a full fetch", async () => {
     const { organization, url } = await makeUrl();
     await prisma.monitoredUrl.update({ where: { id: url.id }, data: { etag: '"old"', validatorsSetAt: new Date() } });

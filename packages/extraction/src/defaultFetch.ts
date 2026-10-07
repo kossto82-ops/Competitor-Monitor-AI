@@ -18,11 +18,12 @@ function headerValue(value: string | string[] | undefined): string | null {
   return v && v.trim() ? v.trim() : null;
 }
 
-export const defaultFetch: FetchFn = async (url, conditional) => {
+export const defaultFetch: FetchFn = async (url, conditional, options) => {
   const result = await safeGet(url, {
     maxBodyBytes: monitoringMaxBodyBytes(),
     allowedContentTypes: HTML_CONTENT_TYPES,
     ...(conditional ? { conditional } : {}),
+    ...(options?.acceptLanguage ? { acceptLanguage: options.acceptLanguage } : {}),
   });
   return {
     status: result.status,

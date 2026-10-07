@@ -27,6 +27,8 @@ export interface SafeFetchOptions {
   allowedContentTypes?: RegExp;
   /** Sent as If-None-Match / If-Modified-Since; a 304 is then returned to the caller as-is. */
   conditional?: { etag?: string | null; lastModified?: string | null };
+  /** Value of the Accept-Language header (already validated by the caller); omitted when not set. */
+  acceptLanguage?: string | null;
   /** Test seam - defaults to a real DNS lookup. */
   resolveFn?: ResolveFn;
 }
@@ -74,6 +76,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
     userAgent = DEFAULT_USER_AGENT,
     allowedContentTypes,
     conditional,
+    acceptLanguage,
     resolveFn,
   } = options;
 
@@ -84,7 +87,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
     assertProtocolAllowed(currentUrl);
     const validatedIp = await resolveAndValidateHost(currentUrl.hostname, resolveFn);
 
-    const response = await requestViaIp(currentUrl, validatedIp, { timeoutMs, maxBodyBytes, userAgent, allowedContentTypes, conditional });
+    const response = await requestViaIp(currentUrl, validatedIp, { timeoutMs, maxBodyBytes, userAgent, allowedContentTypes, conditional, acceptLanguage });
 
     if (isRedirectStatus(response.status) && response.headers.location) {
       if (redirectsLeft <= 0) {
@@ -113,7 +116,7 @@ export async function safeGet(inputUrl: string, options: SafeFetchOptions = {}):
 export function requestViaIp(
   url: URL,
   connectIp: string,
-  opts: { timeoutMs: number; maxBodyBytes: number; userAgent: string; allowedContentTypes?: RegExp; conditional?: { etag?: string | null; lastModified?: string | null } },
+  opts: { timeoutMs: number; maxBodyBytes: number; userAgent: string; allowedContentTypes?: RegExp; conditional?: { etag?: string | null; lastModified?: string | null }; acceptLanguage?: string | null },
 ): Promise<Omit<SafeFetchResult, "finalUrl">> {
   const isHttps = url.protocol === "https:";
   const transport = isHttps ? https : http;
@@ -132,6 +135,8 @@ export function requestViaIp(
           Host: url.hostname,
           "User-Agent": opts.userAgent,
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          // Only characters a language tag list can contain: never lets a caller smuggle a header.
+          ...(opts.acceptLanguage && /^[A-Za-z0-9,;=.\- ]{1,100}$/.test(opts.acceptLanguage) ? { "Accept-Language": opts.acceptLanguage } : {}),
           ...(opts.conditional?.etag ? { "If-None-Match": opts.conditional.etag } : {}),
           ...(opts.conditional?.lastModified ? { "If-Modified-Since": opts.conditional.lastModified } : {}),
         },

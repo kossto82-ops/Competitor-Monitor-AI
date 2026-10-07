@@ -2,6 +2,8 @@ import { comparePrices, parseAmount, type ChangeEventDraft, type ComparisonResul
 import { diffText, type TextHunk } from "./textDiff.js";
 
 export interface PriorSnapshotData {
+  /** The market (Accept-Language locale) the snapshot was requested in; null = none was set. Absent = unknown. */
+  requestedLocale?: string | null;
   /** Version of the extraction logic that produced this snapshot (Phase 29 C2); absent = unknown, assumed comparable. */
   extractorVersion?: number;
   contentHash: string | null;
@@ -11,6 +13,7 @@ export interface PriorSnapshotData {
 }
 
 export interface CurrentExtractionData {
+  requestedLocale?: string | null;
   extractorVersion?: number;
   /** 0-1 quality of the extraction itself (Phase 29 C4); lowers the confidence of every event drawn from it. Absent = 1. */
   confidence?: number;
@@ -60,6 +63,28 @@ export function compareSnapshots(prior: PriorSnapshotData | null, current: Curre
     return {
       verificationState: "NO_CHANGE",
       reason: `Extraction logic changed (v${prior.extractorVersion} -> v${current.extractorVersion}); this scan is the new baseline, not a page change.`,
+      changeEvents: [],
+    };
+  }
+
+  // A different market is a different page: language, currency and prices all differ. Comparing across
+  // markets would report every price as changed the day the customer changes the setting.
+  if (prior.requestedLocale !== undefined && current.requestedLocale !== undefined && prior.requestedLocale !== current.requestedLocale) {
+    return {
+      verificationState: "NO_CHANGE",
+      reason: `The market setting changed (${prior.requestedLocale ?? "none"} -> ${current.requestedLocale ?? "none"}); this scan is the new baseline, not a page change.`,
+      changeEvents: [],
+    };
+  }
+
+  // The same thing happens without anyone touching a setting when the monitoring server's address moves
+  // (many sites choose the currency from it): every price flips currency at once. One such flip is a
+  // new baseline, not dozens of price changes.
+  const marketFlip = detectMarketFlip(prior.entities, current.entities);
+  if (marketFlip) {
+    return {
+      verificationState: "NO_CHANGE",
+      reason: `Every price shown switched currency (${marketFlip}) at once, which points to the page being served for a different market rather than to repricing; this scan is the new baseline.`,
       changeEvents: [],
     };
   }
@@ -585,4 +610,20 @@ function linkPossibleRenames(events: ChangeEventDraft[], priorEntities: Extracte
     replacements.set(a, { ...a, severity: "LOW", confidence: Math.round(a.confidence * 0.8 * 100) / 100, evidenceExcerpt: `${a.evidenceExcerpt} ${note}` });
   }
   return events.map((e) => replacements.get(e) ?? e);
+}
+
+/**
+ * Returns "USD -> INR" when at least two prices are present in both scans and EVERY one of them changed
+ * currency to the same new currency; null otherwise. One price changing currency is a real change.
+ */
+function detectMarketFlip(priorEntities: ExtractedEntity[], currentEntities: ExtractedEntity[]): string | null {
+  const prior = new Map(priorEntities.filter((e) => e.type === "PRICE" && e.currency).map((e) => [e.key, e]));
+  const shared = currentEntities.filter((e) => e.type === "PRICE" && e.currency && prior.has(e.key));
+  if (shared.length < 2) return null;
+  const flips = shared.filter((e) => prior.get(e.key)!.currency !== e.currency);
+  if (flips.length !== shared.length) return null;
+  const targets = new Set(flips.map((e) => e.currency));
+  const sources = new Set(flips.map((e) => prior.get(e.key)!.currency));
+  if (targets.size !== 1 || sources.size !== 1) return null;
+  return `${[...sources][0]} -> ${[...targets][0]}`;
 }

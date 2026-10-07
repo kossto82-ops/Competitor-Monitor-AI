@@ -1,3 +1,4 @@
+import { MARKET_LOCALE_CODES } from "./market.js";
 import { z } from "zod";
 
 /**
@@ -70,6 +71,8 @@ export const updateOrganizationSettingsInputSchema = z.object({
   dailyReportEnabled: z.boolean().optional(),
   /** Empty string clears the override, reverting to the OWNER's email. */
   reportRecipientEmail: z.union([z.string().email(), z.literal("")]).optional(),
+  /** The market competitors' pages are read in (see market.ts). Empty string clears it: the sites' own default. */
+  marketLocale: z.union([z.enum(MARKET_LOCALE_CODES as [string, ...string[]]), z.literal("")]).optional(),
 });
 export type UpdateOrganizationSettingsInput = z.infer<typeof updateOrganizationSettingsInputSchema>;
 
