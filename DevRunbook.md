@@ -137,7 +137,13 @@ keeps failing, ends in the automatic stop above. A missing or unreachable robots
 **Conditional requests (Phase 29 B3b).** Scheduled scans send the validators (`ETag` / `Last-Modified`) saved
 from the last verified fetch; a `304 Not Modified` counts as a successful scan but writes no new snapshot.
 "Scan now" is always a full fetch, and so is any scan once the validators are older than
-`CMA_CONDITIONAL_MAX_AGE_HOURS` (168). Validators are dropped after any failed or unverified scan. See
+`CMA_CONDITIONAL_MAX_AGE_HOURS` (168). Validators are dropped after any failed or unverified scan.
+
+**Source health panel, alerts and stuck jobs (Phase 29 B4).** The sidebar's "Source health" page lists every
+monitored page with its state and the reason, most urgent first. The daily report email adds a "Sources
+needing attention" section for stopped and stale sources of active competitors. On every monitoring tick the
+scheduler also fails jobs whose worker died (RUNNING for over 15 minutes, PENDING for over 2 hours) so a
+killed worker can no longer block the Refresh button or the scan-status poller. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 

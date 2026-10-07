@@ -1,4 +1,4 @@
-import { disableUnreachableSources, listDueMonitoredUrls, listOrganizationsForDailyReportScheduling, type AutoDisableOptions } from "@cma/db";
+import { disableUnreachableSources, listDueMonitoredUrls, listOrganizationsForDailyReportScheduling, sweepStuckJobs, type AutoDisableOptions, type SweepResult } from "@cma/db";
 import { createMonitoringQueue, createDailyReportQueue, createRedisConnection } from "@cma/queue";
 import { enqueueDueMonitoringJobs, type EnqueueAllDeps } from "./enqueueAll.js";
 import { enqueueDailyReportJobs, type EnqueueDailyReportsDeps } from "./enqueueDailyReports.js";
@@ -71,6 +71,8 @@ export interface SchedulerDeps {
    * one-shot enqueue path and existing tests are unaffected; a failure here never blocks monitoring.
    */
   disableUnreachableSources?: () => Promise<{ id: string; url: string }[]>;
+  /** Phase 29 B4: fails jobs whose worker died (stuck RUNNING/PENDING rows). Same isolation as above. */
+  sweepStuckJobs?: () => Promise<SweepResult>;
   /** Injectable so tests can drive ticks deterministically without waiting on real timers. */
   setInterval: typeof setInterval;
   clearInterval: typeof clearInterval;
@@ -98,6 +100,7 @@ export function createDefaultSchedulerDeps(): { deps: SchedulerDeps; close: () =
       createDailyReportQueue: () => ({ add: dailyReportQueue.add.bind(dailyReportQueue), close: async () => undefined }),
     },
     disableUnreachableSources: () => disableUnreachableSources(new Date(), readAutoDisableOptions()),
+    sweepStuckJobs: () => sweepStuckJobs(new Date()),
     monitoringIntervalMs: readIntervalMs("CMA_SCHEDULER_MONITORING_INTERVAL_MS", DEFAULT_MONITORING_INTERVAL_MS),
     dailyReportIntervalMs: readIntervalMs("CMA_SCHEDULER_DAILY_REPORT_INTERVAL_MS", DEFAULT_DAILY_REPORT_INTERVAL_MS),
     setInterval,
@@ -159,6 +162,19 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
   const dailyReportRunning = { current: false };
 
   const runMonitoringTick = async () => {
+    if (deps.sweepStuckJobs) {
+      try {
+        const swept = await deps.sweepStuckJobs();
+        const total = swept.monitoringJobs + swept.aiAnalyses + swept.digestInterpretations;
+        if (total > 0) {
+          console.warn(
+            `[scheduler] failed ${total} stuck job(s): ${swept.monitoringJobs} monitoring, ${swept.aiAnalyses} AI analysis, ${swept.digestInterpretations} digest interpretation`,
+          );
+        }
+      } catch (err) {
+        console.error("[scheduler] stuck-job sweep failed (monitoring continues):", err);
+      }
+    }
     if (deps.disableUnreachableSources) {
       try {
         const stopped = await deps.disableUnreachableSources();

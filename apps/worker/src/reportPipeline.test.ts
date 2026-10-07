@@ -57,6 +57,7 @@ function makeDeps(overrides: Partial<ReportPipelineDeps> = {}): ReportPipelineDe
     markReportEmailSent: vi.fn().mockResolvedValue(undefined),
     markReportEmailFailed: vi.fn().mockResolvedValue(undefined),
     getOrganizationById: vi.fn().mockResolvedValue({ id: "org-1", name: "Acme Inc" }),
+    listSourcesNeedingAttention: vi.fn().mockResolvedValue([]),
     emailProvider: new FakeEmailProvider(),
     getEnabledSmtpConfigForOrg: vi.fn().mockResolvedValue(null),
     createTenantEmailProvider: vi.fn(),

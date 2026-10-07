@@ -132,6 +132,29 @@ describe("startScheduler", () => {
     expect(dailyReports.listOrganizationsForDailyReportScheduling).toHaveBeenCalledTimes(1);
   });
 
+  it("sweeps stuck jobs on each monitoring tick and keeps monitoring if the sweep fails", async () => {
+    const sweep = vi.fn().mockResolvedValue({ monitoringJobs: 1, aiAnalyses: 2, digestInterpretations: 0 });
+    const monitoring = makeMonitoringDeps([{ id: "url-1", organizationId: "org-1" }]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { deps } = makeSchedulerDeps({ monitoring, sweepStuckJobs: sweep });
+    const handle = startScheduler(deps);
+    await flush();
+    expect(sweep).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("3 stuck job"));
+    handle.stop();
+
+    const failing = vi.fn().mockRejectedValue(new Error("db down"));
+    const second = makeMonitoringDeps([{ id: "url-2", organizationId: "org-1" }]);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { deps: deps2 } = makeSchedulerDeps({ monitoring: second, sweepStuckJobs: failing });
+    const handle2 = startScheduler(deps2);
+    await flush();
+    expect(second.listDueMonitoredUrls).toHaveBeenCalled();
+    handle2.stop();
+    warn.mockRestore();
+    errors.mockRestore();
+  });
+
   it("stops unreachable sources before enqueueing, and keeps monitoring if that pass fails", async () => {
     const disable = vi.fn().mockResolvedValue([{ id: "url-9", url: "https://dead.test" }]);
     const monitoring = makeMonitoringDeps([{ id: "url-1", organizationId: "org-1" }]);

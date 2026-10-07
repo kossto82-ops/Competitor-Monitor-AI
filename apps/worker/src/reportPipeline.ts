@@ -67,6 +67,8 @@ export interface ReportPipelineDeps {
   markReportEmailSent: typeof db.markReportEmailSent;
   markReportEmailFailed: typeof db.markReportEmailFailed;
   getOrganizationById: typeof db.getOrganizationById;
+  /** Stopped or stale sources, shown in the email as "Sources needing attention" (Phase 29 B4). */
+  listSourcesNeedingAttention: typeof db.listSourcesNeedingAttention;
   /** The operator's default delivery (env). Used when the organization has no SMTP connection of its own. */
   emailProvider: EmailProvider;
   /** The organization's own SMTP account, if it configured and enabled one (A2b). */
@@ -89,6 +91,7 @@ export function createDefaultReportPipelineDeps(): ReportPipelineDeps {
     markReportEmailSent: db.markReportEmailSent,
     markReportEmailFailed: db.markReportEmailFailed,
     getOrganizationById: db.getOrganizationById,
+    listSourcesNeedingAttention: db.listSourcesNeedingAttention,
     emailProvider: createEmailProviderFromEnv(),
     getEnabledSmtpConfigForOrg: db.getEnabledSmtpConfigForOrg,
     createTenantEmailProvider: (config) =>
@@ -184,6 +187,8 @@ async function attemptReportEmailDelivery(
   try {
     const reportWithItems = await deps.getReportWithItemsForOrg(organizationId, reportId);
     const organization = await deps.getOrganizationById(organizationId);
+    // A failure to compute the alerts must never stop the report from being delivered.
+    const sourceAlerts = await deps.listSourcesNeedingAttention(organizationId).catch(() => []);
 
     const email = buildDailyReportEmail({
       organizationName: organization?.name ?? "Your organization",
@@ -191,6 +196,7 @@ async function attemptReportEmailDelivery(
       competitorCount: reportWithItems.competitorCount,
       competitorsWithChangesCount: reportWithItems.competitorsWithChangesCount,
       changes: reportWithItems.items.map((item) => toReportEmailChangeInput(item.changeEvent)),
+      sourceAlerts: sourceAlerts.map((a) => ({ competitorName: a.competitorName, label: a.label, url: a.url, state: a.state, reason: a.reason })),
       webReportUrl: `${deps.webAppBaseUrl}/reports/${reportId}`,
       recipientEmail: recipient,
     });

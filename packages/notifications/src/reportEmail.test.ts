@@ -133,4 +133,41 @@ describe("buildDailyReportEmail", () => {
     expect(email.html).not.toContain("<script>alert(1)</script>");
     expect(email.html).toContain("&lt;script&gt;");
   });
+
+  describe("sources needing attention (Phase 29 B4)", () => {
+    const base = {
+      organizationName: "Acme Inc",
+      reportDateLabel: "16 September 2026",
+      competitorCount: 1,
+      competitorsWithChangesCount: 0,
+      changes: [],
+      webReportUrl: "https://app.example.test/reports/r1",
+      recipientEmail: "owner@example.test",
+    };
+
+    it("adds a factual section for stopped and stale sources, in text and html", () => {
+      const email = buildDailyReportEmail({
+        ...base,
+        sourceAlerts: [
+          { competitorName: "Rival", label: "Pricing", url: "https://rival.test/pricing", state: "DISABLED", reason: "Monitoring was stopped automatically after sustained failures." },
+          { competitorName: "Other", label: null, url: "https://other.test/", state: "STALE", reason: "The last successful scan is too old to represent the current page." },
+        ],
+      });
+      expect(email.text).toContain("SOURCES NEEDING ATTENTION (2)");
+      expect(email.text).toContain("Rival - Pricing (https://rival.test/pricing): Monitoring stopped.");
+      expect(email.text).toContain("Other (https://other.test/): Data is out of date.");
+      expect(email.html).toContain("Sources needing attention (2)");
+      expect(email.html).toContain("Monitoring stopped");
+    });
+
+    it("renders no section without alerts, and escapes html in names", () => {
+      expect(buildDailyReportEmail({ ...base }).text).not.toContain("SOURCES NEEDING ATTENTION");
+      expect(buildDailyReportEmail({ ...base, sourceAlerts: [] }).html).not.toContain("Sources needing attention");
+      const hostile = buildDailyReportEmail({
+        ...base,
+        sourceAlerts: [{ competitorName: "<script>x</script>", label: null, url: "https://a.test/", state: "STALE", reason: "r" }],
+      });
+      expect(hostile.html).not.toContain("<script>");
+    });
+  });
 });

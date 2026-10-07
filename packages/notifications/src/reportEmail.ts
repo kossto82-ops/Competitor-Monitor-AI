@@ -21,6 +21,14 @@ export interface ReportEmailChangeInput extends ReportChangeSummary {
   aiConfidence: string | null;
 }
 
+export interface ReportEmailSourceAlert {
+  competitorName: string;
+  label: string | null;
+  url: string;
+  state: "STALE" | "DISABLED";
+  reason: string;
+}
+
 export interface BuildReportEmailInput {
   organizationName: string;
   /** Human-formatted date, e.g. "16 September 2026" - already localized by the caller. */
@@ -28,6 +36,11 @@ export interface BuildReportEmailInput {
   competitorCount: number;
   competitorsWithChangesCount: number;
   changes: ReportEmailChangeInput[];
+  /**
+   * Sources that are stopped or stale (Phase 29 B4). Deterministic and factual: it states what the
+   * system observed, never why. Omitted or empty -> no section.
+   */
+  sourceAlerts?: ReportEmailSourceAlert[];
   /** Absolute URL to the authenticated web report - Section 15: the email links to it, never embeds credentials. */
   webReportUrl: string;
   recipientEmail: string;
@@ -78,6 +91,21 @@ export function buildDailyReportEmail(input: BuildReportEmailInput): EmailMessag
       }
       htmlSections.push(`<h3>${escapeHtml(group.competitorName)}</h3><ul>${rows.join("")}</ul>`);
     }
+  }
+
+  const alerts = input.sourceAlerts ?? [];
+  if (alerts.length > 0) {
+    const heading = `Sources needing attention (${alerts.length})`;
+    textLines.push(heading.toUpperCase(), "");
+    const rows: string[] = [];
+    for (const alert of alerts) {
+      const name = alert.label ? `${alert.competitorName} - ${alert.label}` : alert.competitorName;
+      const status = alert.state === "DISABLED" ? "Monitoring stopped" : "Data is out of date";
+      textLines.push(`${name} (${alert.url}): ${status}. ${alert.reason}`);
+      rows.push(`<li><strong>${escapeHtml(name)}</strong> — ${escapeHtml(status)}. ${escapeHtml(alert.reason)}<br/><span style="color:#64748b">${escapeHtml(alert.url)}</span></li>`);
+    }
+    textLines.push("");
+    htmlSections.push(`<h3>${escapeHtml(heading)}</h3><ul>${rows.join("")}</ul>`);
   }
 
   textLines.push(`View full report: ${input.webReportUrl}`);

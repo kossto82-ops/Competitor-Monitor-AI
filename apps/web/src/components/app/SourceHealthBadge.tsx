@@ -1,7 +1,7 @@
-import { deriveSourceHealth, type SourceHealthInput, type SourceHealthState } from "@cma/core";
+import { deriveSourceHealth, type SourceHealth, type SourceHealthInput, type SourceHealthState } from "@cma/core";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 
-const DISPLAY: Record<SourceHealthState, { label: string; tone: BadgeTone }> = {
+export const SOURCE_HEALTH_DISPLAY: Record<SourceHealthState, { label: string; tone: BadgeTone }> = {
   HEALTHY: { label: "Healthy", tone: "green" },
   DEGRADED: { label: "Failing", tone: "amber" },
   STALE: { label: "Stale", tone: "red" },
@@ -10,13 +10,17 @@ const DISPLAY: Record<SourceHealthState, { label: string; tone: BadgeTone }> = {
   DISABLED: { label: "Stopped automatically", tone: "red" },
 };
 
-/** Health of one monitored source, with the plain-language reason as a tooltip. */
-export function SourceHealthBadge({ source }: { source: SourceHealthInput }) {
-  const health = deriveSourceHealth(source);
-  const display = DISPLAY[health.state];
+/** Badge for an already-derived health, with the plain-language reason as a tooltip. */
+export function SourceHealthStateBadge({ health }: { health: SourceHealth }) {
+  const display = SOURCE_HEALTH_DISPLAY[health.state];
   return (
     <Badge tone={display.tone} title={health.reason}>
       {display.label}
     </Badge>
   );
+}
+
+/** Health of one monitored source, derived on the spot from its stored facts. */
+export function SourceHealthBadge({ source }: { source: SourceHealthInput }) {
+  return <SourceHealthStateBadge health={deriveSourceHealth(source)} />;
 }

@@ -17,3 +17,5 @@ export * from "./repositories/aiConnections.js";
 export * from "./repositories/smtpConnections.js";
 export * from "./repositories/intelligence.js";
 export * from "./repositories/patterns.js";
+
+export * from "./repositories/sourceHealth.js";
