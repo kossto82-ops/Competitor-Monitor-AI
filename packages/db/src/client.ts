@@ -34,8 +34,15 @@ if (process.env["NODE_ENV"] !== "production") {
 
 let observing = false;
 let queryCount = 0;
-prisma.$on("query", () => {
-  if (observing) queryCount += 1;
+// Prisma's connection pool validates a connection with a literal `SELECT 1` before handing it out
+// when it has been idle for a moment, and logs that probe as an ordinary "query" event. It is not a
+// query the code under test issued, it appears at random (more often on a loaded machine), and
+// counting it made every query-count assertion intermittently one too high. Real application queries
+// are never a bare `SELECT 1`, so ignoring exactly that statement loses nothing.
+const POOL_HEALTH_CHECK = "SELECT 1";
+
+prisma.$on("query", (event) => {
+  if (observing && event.query.trim() !== POOL_HEALTH_CHECK) queryCount += 1;
 });
 
 /**
@@ -46,22 +53,12 @@ prisma.$on("query", () => {
  * looks right".
  */
 export async function countPrismaQueries(fn: () => Promise<unknown>): Promise<number> {
-  // Prisma delivers "query" events asynchronously, so one can arrive AFTER the awaited call that
-  // caused it has resolved. Without a flush, the last query of whatever ran just before this window
-  // is counted inside it (+1), and the last query of this window can be missed (-1) - the source of
-  // the intermittent "expected 5 to be <= 4" and "counts differ by one" CI failures.
-  await flushQueryEvents();
   queryCount = 0;
   observing = true;
   try {
     await fn();
-    await flushQueryEvents();
     return queryCount;
   } finally {
     observing = false;
   }
-}
-
-function flushQueryEvents(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 40));
 }

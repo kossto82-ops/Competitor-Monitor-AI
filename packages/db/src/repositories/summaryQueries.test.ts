@@ -188,10 +188,7 @@ describe.skipIf(!reachable)("listCompetitorsWithSummaryForOrg / listMonitoredUrl
       // batched via `in: urlIds`) = 4, regardless of how many rows exist.
       const queryCount = await countPrismaQueries(() => listCompetitorsWithSummaryForOrg(org.id));
 
-      // Headroom of 2 over the exact 4: the counter listens on the process-wide client, and one CI run
-      // observed 5 (an incidental query, not a per-row one). The purpose is unchanged - an N+1
-      // regression with 15 rows issues 16+ queries, so this still catches it.
-      expect(queryCount).toBeLessThanOrEqual(6);
+      expect(queryCount).toBeLessThanOrEqual(4);
       expect(queryCount).toBeGreaterThan(0); // sanity: the counter itself is wired up
     });
   });
@@ -303,10 +300,7 @@ describe.skipIf(!reachable)("listCompetitorsWithSummaryForOrg / listMonitoredUrl
       // `in: urlIds`) = 4, regardless of how many URLs exist.
       const queryCount = await countPrismaQueries(() => listMonitoredUrlsWithStatusForOrg(org.id, comp.id));
 
-      // Headroom of 2 over the exact 4: the counter listens on the process-wide client, and one CI run
-      // observed 5 (an incidental query, not a per-row one). The purpose is unchanged - an N+1
-      // regression with 15 rows issues 16+ queries, so this still catches it.
-      expect(queryCount).toBeLessThanOrEqual(6);
+      expect(queryCount).toBeLessThanOrEqual(4);
       expect(queryCount).toBeGreaterThan(0);
     });
   });
