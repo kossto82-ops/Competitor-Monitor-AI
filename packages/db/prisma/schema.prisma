@@ -216,8 +216,6 @@ model MonitoredUrl {
   scanFrequencyMinutes    Int         @default(1440)
   // Escalation flags for later tiers - read but not acted on by Phase 1's
   // pipeline (only HttpExtractor/CheerioExtractor exist so far).
-  requiresJs              Boolean     @default(false)
-  requiresInteraction     Boolean     @default(false)
   isActive                Boolean     @default(true)
   lastSuccessfulScanAt    DateTime?
   consecutiveFailureCount Int         @default(0)
@@ -309,6 +307,9 @@ model Snapshot {
 
 model ExtractedEntity {
   id         String   @id @default(cuid())
+  // Phase 29 C5: every tenant-owned table carries its organization; this one only reached it through
+  // the snapshot, which made a direct tenant-scoped read impossible.
+  organizationId String
   snapshotId String
   snapshot   Snapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
 
@@ -321,6 +322,7 @@ model ExtractedEntity {
 
   @@index([snapshotId])
   @@index([key])
+  @@index([organizationId])
   @@map("extracted_entities")
 }
 
@@ -352,6 +354,9 @@ model ChangeEvent {
 
   @@index([organizationId])
   @@index([monitoredUrlId, detectedAt])
+  // Phase 29 C5: one event per type and field in a snapshot. A retried or duplicated write fails loudly
+  // instead of showing the customer the same change twice.
+  @@unique([currentSnapshotId, changeType, fieldPath])
   @@map("change_events")
 }
 

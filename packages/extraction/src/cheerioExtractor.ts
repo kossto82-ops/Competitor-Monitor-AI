@@ -6,6 +6,7 @@ import {
   extractGenericPriceEntities,
   EXTRACTOR_VERSION,
   cleanBody,
+  disambiguateKeys,
   extractJsonLdEntities,
   extractMainContent,
   extractVisibleText,
@@ -19,9 +20,8 @@ import type { RobotsChecker } from "./robots.js";
 /**
  * Tiers 2-3 combined: parses the HTML DOM for visible text and pulls
  * structured entities (JSON-LD first, generic price-pattern fallback).
- * This is the extractor the Phase 1 monitoring pipeline actually runs
- * for every URL - HttpExtractor exists as the simpler tier of the same
- * interface, not as a required first step every scan has to repeat.
+ * This is the one extractor the monitoring pipeline runs for every URL
+ * (the unused HTTP-only tier was removed in Phase 29 C5).
  */
 /**
  * Hash of the FACTS the entities carry (what it is, what it costs, in which currency) and nothing else.
@@ -99,7 +99,8 @@ export class CheerioExtractor implements Extractor {
       // anything - real dogfooding showed most competitor pages express
       // promotions only as styled HTML text, never as schema.org markup.
       const htmlPromotionEntities = mergeHtmlPromotionsWithJsonLd(jsonLdEntities, extractHtmlPromotionEntities($));
-      const entities: ExtractedEntity[] = [...baseEntities, ...htmlPromotionEntities];
+      // Phase 29 C5: no two entities of one scan may share a key, whichever extractor produced them.
+      const entities: ExtractedEntity[] = disambiguateKeys([...baseEntities, ...htmlPromotionEntities]);
 
       const warnings: string[] = [];
       let confidence = 1;

@@ -481,4 +481,47 @@ describe("compareSnapshots - promotion added/changed/removed", () => {
       }
     });
   });
+
+  describe("identity (Phase 29 C5)", () => {
+    const plan = (name: string, value: string, period = "month", currency = "USD") =>
+      priceEntity({ key: `plan:${name.toLowerCase()}:${period}`, label: `${name} (per ${period})`, value, currency });
+    const run = (before: ExtractedEntity[], after: ExtractedEntity[]) =>
+      compareSnapshots(makePrior({ entities: before }), makeCurrent({ contentHash: "hash-b", structuredDataHash: "struct-b", entities: after }));
+
+    it("links a removal and an addition with the same price, currency and period as a probable rename", () => {
+      const events = run([plan("Pro", "29.00")], [plan("Growth", "29.00")]).changeEvents;
+      const removed = events.find((e) => e.changeType === "PRODUCT_REMOVED")!;
+      const added = events.find((e) => e.changeType === "PRODUCT_ADDED")!;
+      for (const event of [removed, added]) {
+        expect(event.severity).toBe("LOW");
+        expect(event.evidenceExcerpt).toContain('Possibly renamed: "Pro" -> "Growth"');
+      }
+      // The two facts are still both reported.
+      expect(events.filter((e) => e.changeType === "PRODUCT_REMOVED" || e.changeType === "PRODUCT_ADDED")).toHaveLength(2);
+    });
+
+    it("does not link when the price, currency or billing period differs", () => {
+      for (const after of [plan("Growth", "39.00"), plan("Growth", "29.00", "month", "EUR"), plan("Growth", "29.00", "year")]) {
+        const events = run([plan("Pro", "29.00")], [after]).changeEvents;
+        expect(events.every((e) => !e.evidenceExcerpt.includes("Possibly renamed"))).toBe(true);
+        expect(events.find((e) => e.changeType === "PRODUCT_ADDED")!.severity).toBe("MEDIUM");
+      }
+    });
+
+    it("does not guess when the match is ambiguous (two plans share the price)", () => {
+      const events = run([plan("Pro", "29.00")], [plan("Growth", "29.00"), plan("Scale", "29.00")]).changeEvents;
+      expect(events.every((e) => !e.evidenceExcerpt.includes("Possibly renamed"))).toBe(true);
+    });
+
+    it("never links a plan to a JSON-LD product, nor monthly to yearly keys", () => {
+      const events = run([plan("Pro", "29.00")], [priceEntity({ key: "jsonld:growth", label: "Growth", value: "29.00", currency: "USD" })]).changeEvents;
+      expect(events.every((e) => !e.evidenceExcerpt.includes("Possibly renamed"))).toBe(true);
+    });
+
+    it("emits at most one event per change type and field, even if the same key appears twice on the page", () => {
+      const duplicate = [plan("Team", "50.00"), plan("Team", "50.00")];
+      const events = run([plan("Pro", "29.00")], [plan("Pro", "29.00"), ...duplicate]).changeEvents;
+      expect(events.filter((e) => e.changeType === "PRODUCT_ADDED" && e.entityKey === "plan:team:month")).toHaveLength(1);
+    });
+  });
 });

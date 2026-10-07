@@ -98,6 +98,7 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
         extractorVersion: extraction.extractorVersion ?? 1,
         extractedEntities: {
           create: extraction.extractedEntities.map((entity) => ({
+            organizationId,
             type: entity.type,
             key: entity.key,
             label: entity.label,

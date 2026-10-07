@@ -28,8 +28,9 @@ export function extractVisibleText($: cheerio.CheerioAPI): string {
  *   2 = main content region with page chrome and volatile text removed
  *   3 = plan cards/tables become PRICE entities when there is no JSON-LD (Phase 29 C3)
  *   4 = structured hash covers only entity facts; application shells are unverified (Phase 29 C4)
+ *   5 = every JSON-LD offer is a price and entity keys are unique per scan (Phase 29 C5)
  */
-export const EXTRACTOR_VERSION = 4;
+export const EXTRACTOR_VERSION = 5;
 
 // Page chrome that is not the page's own content. Removed everywhere in the document.
 const ALWAYS_NOISE = "nav, [role='navigation'], [role='banner'], [role='contentinfo'], [role='dialog'], [role='alertdialog'], [role='search']";
@@ -148,7 +149,23 @@ export function extractJsonLdEntities($: cheerio.CheerioAPI): ExtractedEntity[] 
     }
   });
 
-  return entities;
+  return disambiguateKeys(entities);
+}
+
+/**
+ * Phase 29 C5: two entities must never share a key. Two products with the same name (or one product
+ * with several offers) used to collide on `jsonld:{name}`: the diff then compared the wrong pair and
+ * one of them was invisible. The first occurrence keeps the historical key, so existing history is
+ * untouched; later ones get `#2`, `#3`... in order of appearance, which is stable while the page
+ * lists them in the same order.
+ */
+export function disambiguateKeys(entities: ExtractedEntity[]): ExtractedEntity[] {
+  const seen = new Map<string, number>();
+  return entities.map((entity) => {
+    const count = (seen.get(entity.key) ?? 0) + 1;
+    seen.set(entity.key, count);
+    return count === 1 ? entity : { ...entity, key: `${entity.key}#${count}` };
+  });
 }
 
 /**
@@ -173,16 +190,18 @@ function collectProductLikeEntities(node: unknown, out: ExtractedEntity[], raw: 
   const name = typeof obj["name"] === "string" ? (obj["name"] as string) : undefined;
   const isCommercialEntity = type !== undefined && COMMERCIAL_OFFER_TYPES.has(type);
 
-  const offer = extractOffer(obj["offers"]);
-  if (offer && isCommercialEntity) {
-    out.push({
-      type: "PRICE",
-      key: `jsonld:${name ?? "unknown"}`.toLowerCase(),
-      label: name ?? "Unnamed product",
-      value: offer.price,
-      currency: offer.currency,
-      raw,
-    });
+  // Every offer of the node is a price (a product listed monthly and yearly has two), not just the first.
+  if (isCommercialEntity) {
+    for (const offer of extractOffers(obj["offers"])) {
+      out.push({
+        type: "PRICE",
+        key: `jsonld:${name ?? "unknown"}`.toLowerCase(),
+        label: name ?? "Unnamed product",
+        value: offer.price,
+        currency: offer.currency,
+        raw,
+      });
+    }
   }
 
   // Phase 23: same commercial-entity gate as the PRICE entity above (see
@@ -209,14 +228,18 @@ function collectProductLikeEntities(node: unknown, out: ExtractedEntity[], raw: 
   }
 }
 
-function extractOffer(offers: unknown): { price: string; currency: string | null } | null {
-  const offer = Array.isArray(offers) ? offers[0] : offers;
-  if (!offer || typeof offer !== "object") return null;
-  const obj = offer as Record<string, unknown>;
-  const price = obj["price"] ?? obj["lowPrice"];
-  if (price === undefined || price === null) return null;
-  const currency = typeof obj["priceCurrency"] === "string" ? (obj["priceCurrency"] as string) : null;
-  return { price: String(price), currency };
+function extractOffers(offers: unknown): { price: string; currency: string | null }[] {
+  const list = Array.isArray(offers) ? offers : [offers];
+  const out: { price: string; currency: string | null }[] = [];
+  for (const offer of list) {
+    if (!offer || typeof offer !== "object") continue;
+    const obj = offer as Record<string, unknown>;
+    const price = obj["price"] ?? obj["lowPrice"];
+    if (price === undefined || price === null) continue;
+    const currency = typeof obj["priceCurrency"] === "string" ? (obj["priceCurrency"] as string) : null;
+    out.push({ price: String(price), currency });
+  }
+  return out;
 }
 
 /**

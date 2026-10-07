@@ -124,10 +124,9 @@ export function hostOfUrl(url: string): string | null {
 
 /** Phase 5 (Section 4): editing an existing monitored URL - label, category, frequency, and pause/resume (`isActive`). */
 export async function updateMonitoredUrl(organizationId: string, monitoredUrlId: string, input: UpdateMonitoredUrlInput) {
-  await getMonitoredUrlForOrg(organizationId, monitoredUrlId);
-
-  return prisma.monitoredUrl.update({
-    where: { id: monitoredUrlId },
+  // Ownership is part of the write (Phase 29 C5), see updateCompetitor.
+  const { count } = await prisma.monitoredUrl.updateMany({
+    where: { id: monitoredUrlId, organizationId },
     data: {
       ...(input.label !== undefined ? { label: input.label } : {}),
       ...(input.category !== undefined ? { category: input.category } : {}),
@@ -138,6 +137,8 @@ export async function updateMonitoredUrl(organizationId: string, monitoredUrlId:
       ...(input.isActive === true ? { disabledAt: null, disabledReason: null, consecutiveFailureCount: 0, lastAttemptAt: null } : {}),
     },
   });
+  if (count === 0) throw new NotFoundError("MonitoredUrl");
+  return getMonitoredUrlForOrg(organizationId, monitoredUrlId);
 }
 
 export const AUTO_DISABLE_REASON = "AUTO_SUSTAINED_FAILURE";
@@ -186,14 +187,12 @@ export async function disableUnreachableSources(now: Date = new Date(), options:
  * would cascade-delete that auditable history.
  */
 export async function deleteMonitoredUrlIfSafe(organizationId: string, monitoredUrlId: string): Promise<void> {
-  await getMonitoredUrlForOrg(organizationId, monitoredUrlId);
+  // Atomic: deleted only if it is this organization's and still has no recorded snapshot at that instant.
+  const { count } = await prisma.monitoredUrl.deleteMany({ where: { id: monitoredUrlId, organizationId, snapshots: { none: {} } } });
+  if (count > 0) return;
 
-  const snapshotCount = await prisma.snapshot.count({ where: { monitoredUrlId } });
-  if (snapshotCount > 0) {
-    throw new ConflictError("This URL has monitoring history - pause it instead of deleting it.");
-  }
-
-  await prisma.monitoredUrl.delete({ where: { id: monitoredUrlId } });
+  await getMonitoredUrlForOrg(organizationId, monitoredUrlId); // NotFoundError if it is not this organization's
+  throw new ConflictError("This URL has monitoring history - pause it instead of deleting it.");
 }
 
 /**

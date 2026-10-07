@@ -90,11 +90,9 @@ export interface UpdateAiConnectionInput {
 }
 
 export async function updateAiConnection(organizationId: string, id: string, input: UpdateAiConnectionInput): Promise<SafeAiConnection> {
-  const existing = await prisma.aiConnection.findFirst({ where: { id, organizationId } });
-  if (!existing) throw new NotFoundError("AiConnection");
-
-  const row = await prisma.aiConnection.update({
-    where: { id },
+  // Ownership is part of the write itself (Phase 29 C5).
+  const { count } = await prisma.aiConnection.updateMany({
+    where: { id, organizationId },
     data: {
       ...(input.provider !== undefined ? { provider: input.provider } : {}),
       ...(input.model !== undefined ? { model: input.model } : {}),
@@ -103,13 +101,15 @@ export async function updateAiConnection(organizationId: string, id: string, inp
       ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
     },
   });
+  if (count === 0) throw new NotFoundError("AiConnection");
+  const row = await prisma.aiConnection.findFirst({ where: { id, organizationId } });
+  if (!row) throw new NotFoundError("AiConnection");
   return toSafeAiConnection(row);
 }
 
 export async function deleteAiConnection(organizationId: string, id: string): Promise<void> {
-  const existing = await prisma.aiConnection.findFirst({ where: { id, organizationId } });
-  if (!existing) throw new NotFoundError("AiConnection");
-  await prisma.aiConnection.delete({ where: { id } });
+  const { count } = await prisma.aiConnection.deleteMany({ where: { id, organizationId } });
+  if (count === 0) throw new NotFoundError("AiConnection");
 }
 
 /**

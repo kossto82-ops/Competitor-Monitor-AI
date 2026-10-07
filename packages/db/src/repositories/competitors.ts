@@ -43,11 +43,10 @@ export async function getCompetitorForOrg(organizationId: string, competitorId: 
  * inactive) but never deletes or hides its historical intelligence.
  */
 export async function updateCompetitor(organizationId: string, competitorId: string, input: UpdateCompetitorInput) {
-  const existing = await prisma.competitor.findFirst({ where: { id: competitorId, organizationId } });
-  if (!existing) throw new NotFoundError("Competitor");
-
-  return prisma.competitor.update({
-    where: { id: competitorId },
+  // Phase 29 C5: ownership is part of the write itself (updateMany with organizationId), not a read
+  // followed by a write by id - there is no window in which the row could change hands in between.
+  const { count } = await prisma.competitor.updateMany({
+    where: { id: competitorId, organizationId },
     data: {
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.website !== undefined ? { website: input.website } : {}),
@@ -55,6 +54,8 @@ export async function updateCompetitor(organizationId: string, competitorId: str
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
     },
   });
+  if (count === 0) throw new NotFoundError("Competitor");
+  return getCompetitorForOrg(organizationId, competitorId);
 }
 
 /**
@@ -67,15 +68,14 @@ export async function updateCompetitor(organizationId: string, competitorId: str
  * zero monitored URLs (nothing to lose) can actually be deleted.
  */
 export async function deleteCompetitorIfSafe(organizationId: string, competitorId: string): Promise<void> {
-  const existing = await prisma.competitor.findFirst({ where: { id: competitorId, organizationId } });
+  // One atomic statement: delete only if it is this organization's AND it still has no URLs at the
+  // moment of the delete (a URL added between a separate count and the delete can no longer be lost).
+  const { count } = await prisma.competitor.deleteMany({ where: { id: competitorId, organizationId, monitoredUrls: { none: {} } } });
+  if (count > 0) return;
+
+  const existing = await prisma.competitor.findFirst({ where: { id: competitorId, organizationId }, select: { id: true } });
   if (!existing) throw new NotFoundError("Competitor");
-
-  const urlCount = await prisma.monitoredUrl.count({ where: { competitorId } });
-  if (urlCount > 0) {
-    throw new ConflictError("This competitor has monitored URLs and history - deactivate it instead of deleting it.");
-  }
-
-  await prisma.competitor.delete({ where: { id: competitorId } });
+  throw new ConflictError("This competitor has monitored URLs and history - deactivate it instead of deleting it.");
 }
 
 /**

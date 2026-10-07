@@ -1,5 +1,4 @@
 export type { ConditionalRequest, Extractor, FetchFn, FetchedPage } from "./types.js";
-export { HttpExtractor } from "./httpExtractor.js";
 export { CheerioExtractor } from "./cheerioExtractor.js";
 export { sha256 } from "./hash.js";
 export {

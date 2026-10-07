@@ -164,7 +164,13 @@ times the extraction quality times the reliability of its source (JSON-LD 1.0, p
 0.8, bare price 0.6); a low-confidence event is shown one severity level lower. A price that returns to its previous
 value within 48 hours is kept but marked low severity as a probable A/B test or regional price. A page that is an empty
 client-rendered application (or nearly empty) is an unverified scan, not a successful one: it counts against the
-source's health and never produces added/removed events. See
+source's health and never produces added/removed events.
+
+**Identity and data integrity (Phase 29 C5).** A plan that vanishes under one name while another appears with the
+same price, currency and billing period is flagged on both events as a probable rename (never merged, never guessed
+when ambiguous). Entity keys are unique per scan (`#2`, `#3` for repeats) and a snapshot holds at most one event per
+type and field (enforced by a unique index). Tenant-owned rows carry `organizationId` everywhere, including extracted
+entities, and user-driven edits/deletes are single atomic statements scoped by organization. See
 [PHASE28.1](docs/phases/PHASE28.1-MONITORING-BACKOFF-REPORT.md) for the known limitations. The
 scheduler and the worker are separate processes — **both** must be running.
 

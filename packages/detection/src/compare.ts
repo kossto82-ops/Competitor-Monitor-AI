@@ -75,7 +75,9 @@ export function compareSnapshots(prior: PriorSnapshotData | null, current: Curre
     ...detectPromotionChanges(prior.entities, current.entities),
     ...detectPromotionAddedOrRemoved(prior.entities, current.entities),
   ].map((event) => finalizeEvent(event, current.confidence ?? 1));
-  const changeEvents = flagOscillations(entityEvents, options.recentEvents ?? [], options.now ?? new Date());
+  const changeEvents = dedupeEvents(
+    linkPossibleRenames(flagOscillations(entityEvents, options.recentEvents ?? [], options.now ?? new Date()), prior.entities, current.entities),
+  );
 
   // Phase 29 C4: the page text is diffed block by block. Changes that an entity event already explains
   // (the price digits of a PRICE_CHANGE, the card of a PRODUCT_ADDED) are not repeated as a vague
@@ -516,4 +518,71 @@ function flagOscillations(events: ChangeEventDraft[], recent: RecentChangeEvent[
       evidenceExcerpt: `${event.evidenceExcerpt} Reverts the change detected ${hours}h ago (possible A/B test or regional pricing).`,
     };
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phase 29 C5: identity
+// ---------------------------------------------------------------------------------------------
+
+/** One event per (change type, field): the database enforces it, and a repeated key must never fail a scan. */
+function dedupeEvents(events: ChangeEventDraft[]): ChangeEventDraft[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    const id = `${event.changeType}|${event.fieldPath}`;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function planNameOf(label: string): string {
+  return label.replace(/\s*\(per (?:month|year)\)\s*$/i, "").trim();
+}
+
+function keyFamily(key: string | null): string | null {
+  if (!key) return null;
+  if (key.startsWith("plan:")) return `plan:${key.slice(key.lastIndexOf(":") + 1)}`; // same billing period
+  if (key.startsWith("jsonld:")) return "jsonld";
+  return null;
+}
+
+/**
+ * A plan that disappears under one name while another appears with the SAME price, currency and billing
+ * period is most often a rename, not a removal plus an unrelated launch. Treating it as two independent
+ * events loses the connection (and, for the customer, reads as two market moves). It is only linked when
+ * the match is unambiguous - exactly one candidate on each side - and never merged into a new event type:
+ * both events stay (they are still true), but each says what it probably is and is shown as low severity.
+ * Real identity continuity (price history surviving a rename) needs the Entity tables of Phase D.
+ */
+function linkPossibleRenames(events: ChangeEventDraft[], priorEntities: ExtractedEntity[], currentEntities: ExtractedEntity[]): ChangeEventDraft[] {
+  const removed = events.filter((e) => e.changeType === "PRODUCT_REMOVED" && e.entityKey);
+  const added = events.filter((e) => e.changeType === "PRODUCT_ADDED" && e.entityKey);
+  if (removed.length === 0 || added.length === 0) return events;
+
+  const priorByKey = new Map(priorEntities.map((e) => [e.key, e]));
+  const currentByKey = new Map(currentEntities.map((e) => [e.key, e]));
+
+  const matches = (r: ChangeEventDraft, a: ChangeEventDraft): boolean => {
+    const before = priorByKey.get(r.entityKey!);
+    const after = currentByKey.get(a.entityKey!);
+    if (!before || !after || before.value === null || after.value === null) return false;
+    const familyBefore = keyFamily(before.key);
+    if (familyBefore === null || familyBefore !== keyFamily(after.key)) return false;
+    return comparePrices(before, after).kind === "same";
+  };
+
+  const replacements = new Map<ChangeEventDraft, ChangeEventDraft>();
+  for (const r of removed) {
+    const candidates = added.filter((a) => matches(r, a));
+    if (candidates.length !== 1) continue;
+    const a = candidates[0]!;
+    if (removed.filter((other) => matches(other, a)).length !== 1) continue;
+
+    const oldName = planNameOf(priorByKey.get(r.entityKey!)!.label);
+    const newName = planNameOf(currentByKey.get(a.entityKey!)!.label);
+    const note = `Possibly renamed: "${oldName}" -> "${newName}" (same price, currency and billing period).`;
+    replacements.set(r, { ...r, severity: "LOW", confidence: Math.round(r.confidence * 0.8 * 100) / 100, evidenceExcerpt: `${r.evidenceExcerpt} ${note}` });
+    replacements.set(a, { ...a, severity: "LOW", confidence: Math.round(a.confidence * 0.8 * 100) / 100, evidenceExcerpt: `${a.evidenceExcerpt} ${note}` });
+  }
+  return events.map((e) => replacements.get(e) ?? e);
 }
