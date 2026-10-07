@@ -358,6 +358,29 @@ observations); nothing could be recovered because `.local-infra/` is not in git 
   `prisma migrate resolve --applied <migration-name>` for each migration instead of letting it reset.
 - Want a backup of the local database? `pg_dump` from `.local-infra/postgres/pgsql/bin` before risky work.
 
+## 7e. Pricing pilot (8 real sites)
+
+A long-running observation of 8 real pricing pages (4 marketing tools, 4 B2B CRMs), started 2026-10-07 to measure
+what the product reports when nobody has changed anything (false positives) and when someone does. Everything
+lives in `scripts/pilot/`:
+
+```bash
+node scripts/pilot/seedPilot.mjs        # once: creates the organization and registers the 8 pages (hourly)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pilot/start.ps1   # Redis (loopback only), worker, scheduler, keep-awake
+node scripts/pilot/status.mjs           # what has been observed so far (read-only)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pilot/stop.ps1    # stops worker, scheduler, keep-awake
+```
+
+- **The machine has to stay awake and online.** `start.ps1` runs a keep-awake helper (a sleep-inhibit request that
+  ends with its process; it changes no Windows setting), but a closed laptop lid still suspends the machine, and so
+  does a company policy that forces it. Missed hours are simply missed scans, not wrong data.
+- **Processes are detached from the terminal**, with logs and pid files in `.local-infra/pilot/`. If they stop
+  (reboot, app closed), run `start.ps1` again: it only starts what is not running.
+- The login for the web UI is in `.local-infra/pilot-credentials.txt` (git-ignored).
+- Changing `EXTRACTOR_VERSION` during the pilot makes the next scan of each page a new baseline; note the date.
+- Pages that block the monitor (403) or need a browser stay `DEGRADED` and back off up to 24 h between attempts;
+  they are stopped automatically only after 14 days without a success.
+
 ## 8. Git workflow
 
 - Branch from `main`, name branches descriptively (e.g. `feature/dashboard-competitors-list`).
