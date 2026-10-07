@@ -263,5 +263,39 @@
       "period": "month"
     }
   ],
-  "configurator-total-and-credits.html": []
+  "configurator-total-and-credits.html": [],
+  "flat-sequence-grid.html": [
+    {
+      "name": "Lite",
+      "amount": 19,
+      "currency": "CAD",
+      "period": "month"
+    },
+    {
+      "name": "Growth",
+      "amount": 49,
+      "currency": "CAD",
+      "period": "month"
+    },
+    {
+      "name": "Premium",
+      "amount": 79,
+      "currency": "CAD",
+      "period": "month"
+    },
+    {
+      "name": "Ultimate",
+      "amount": 109,
+      "currency": "CAD",
+      "period": "month"
+    }
+  ],
+  "same-name-two-products.html": [
+    {
+      "name": "Standard",
+      "amount": 14,
+      "currency": "USD",
+      "period": "month"
+    }
+  ]
 }

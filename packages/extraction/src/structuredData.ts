@@ -31,8 +31,9 @@ export function extractVisibleText($: cheerio.CheerioAPI): string {
  *   5 = every JSON-LD offer is a price and entity keys are unique per scan (Phase 29 C5)
  *   6 = named plan offers, split cents, configurator totals ignored (Phase 29 triage on 8 real sites)
  *   7 = plan keys no longer include the billing period unless a page lists a plan twice (history replay)
+ *   8 = flat plan grids (Pipedrive), notes with a second price, same-name plans with different prices dropped
  */
-export const EXTRACTOR_VERSION = 7;
+export const EXTRACTOR_VERSION = 8;
 
 // Page chrome that is not the page's own content. Removed everywhere in the document.
 const ALWAYS_NOISE = "nav, [role='navigation'], [role='banner'], [role='contentinfo'], [role='dialog'], [role='alertdialog'], [role='search']";

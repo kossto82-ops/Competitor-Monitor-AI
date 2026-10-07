@@ -113,8 +113,36 @@ const MONTH = /\/\s*(?:mo|month)\b|\bper\s+(?:\w+\s*(?:\/|per)\s*)?month\b|\bmon
 const YEAR = /\/\s*(?:yr|year)\b|\bper\s+(?:\w+\s*(?:\/|per)\s*)?year\b|\byearly\b|\bannual(?:ly)?\b|\ba\s+year\b|\byr\b|\bal\s+a[nñ]o\b|\/\s*a[nñ]o\b|\bpar\s+an\b|\bpro\s+jahr\b/i;
 
 /** The billing period written near a price; the first one AFTER the price wins ("$10 /mo billed annually" is monthly). */
+/**
+ * A billing note often states a SECOND price with its own period next to the headline one ("$19 ... One
+ * payment of $228 per seat/year ... Per seat per month, billed annually"). The period written right after
+ * that other amount belongs to it, not to the headline price, so it is dropped before the headline's is read.
+ * Only applies when the headline token is known and present: otherwise every amount would count as "other".
+ */
+function withoutOtherPrices(text: string, headline?: string, dropAll = false): string {
+  if (!dropAll && (!headline || !text.includes(headline))) return text;
+  let out = text;
+  for (const other of findPriceTokens(text)) {
+    if (!dropAll && other.token === headline) continue;
+    const at = out.indexOf(other.token);
+    if (at === -1) continue;
+    const rest = out.slice(at + other.token.length);
+    const phrase = /^\s*(?:per\s+(?:\w+\s*\/\s*)?(?:year|yr|month|mo)\b|\/\s*(?:year|yr|month|mo)\b|a\s+(?:year|month)\b)/i.exec(rest);
+    out = `${out.slice(0, at)} ${rest.slice(phrase ? phrase[0].length : 0)}`;
+  }
+  return out;
+}
+
+/** The period a billing NOTE next to a price states ("Per seat per month, billed annually"), ignoring any other amount in it. */
+export function detectPeriodInNote(text: string): "month" | "year" | null {
+  return readPeriod(normalizeWhitespace(withoutOtherPrices(normalizeWhitespace(text), undefined, true)));
+}
+
 export function detectPeriod(text: string, token?: string): "month" | "year" | null {
-  const normalized = normalizeWhitespace(text);
+  return readPeriod(normalizeWhitespace(withoutOtherPrices(normalizeWhitespace(text), token)), token);
+}
+
+function readPeriod(normalized: string, token?: string): "month" | "year" | null {
   const scopes: string[] = [];
   if (token) {
     const at = normalized.indexOf(token);
@@ -141,8 +169,12 @@ const NAME_SELECTOR =
 const STRUCK =
   "s, del, strike, [class*='strike'], [class*='line-through'], [class*='old-price'], [class*='was-price'], [class*='original-price'], [class*='price-old'], [class*='crossed']";
 
+// Calls to action sit right next to plan names ("Try it free", "See all features") and are never one.
+const CTA_START = /^(?:see|try|buy|get|start|sign|learn|contact|view|compare|choose|select|book|request|talk|download|watch|explore|read|find)\b/i;
+
 function isPlausibleName(text: string): boolean {
   const name = normalizeWhitespace(text);
+  if (CTA_START.test(name)) return false;
   if (name.length < 2 || name.length > 40) return false;
   if (!/[A-Za-zÀ-ɏ]/.test(name)) return false;
   if (findPriceTokens(name).length > 0) return false;
@@ -268,15 +300,27 @@ export function extractPricingPlans($: cheerio.CheerioAPI, $root: cheerio.Cheeri
     if (found) plans.push(found);
   }
 
-  // Keep the first occurrence of each (name, period): a repeated plan (e.g. a sticky copy of the
-  // same card) must not produce two entities with one key.
+  // A plan repeated with the SAME price (a sticky copy of a card, a mobile twin) is one plan.
   const seen = new Set<string>();
-  return plans.filter((p) => {
-    const key = `${slug(p.name)}:${p.period ?? "na"}`;
+  const unique = plans.filter((p) => {
+    const key = `${slug(p.name)}:${p.period ?? "na"}:${p.amount}:${p.currency ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+  // The same name with DIFFERENT prices (Zoho lists an "Enterprise" for each of two products) has no
+  // stable identity: whichever key we gave each one would depend on page order or price rank, and the
+  // moment one of them disappears from a capture the other would look like a price change (replaying real
+  // history produced "Enterprise 2400 -> 420" and back). False negatives over fabricated continuity:
+  // such names are left out.
+  const pricesByName = new Map<string, Set<number>>();
+  for (const p of unique) {
+    const k = `${slug(p.name)}:${p.period ?? "na"}`;
+    const set = pricesByName.get(k) ?? new Set<number>();
+    set.add(p.amount);
+    pricesByName.set(k, set);
+  }
+  return unique.filter((p) => (pricesByName.get(`${slug(p.name)}:${p.period ?? "na"}`)?.size ?? 1) === 1);
 }
 
 function planFromCard($: cheerio.CheerioAPI, priceEl: AnyNode, allPriceEls: AnyNode[]): PlanPrice | null {
@@ -287,7 +331,7 @@ function planFromCard($: cheerio.CheerioAPI, priceEl: AnyNode, allPriceEls: AnyN
   for (let depth = 0; depth < 8 && node; depth += 1) {
     const container = node;
     const inside = allPriceEls.filter((p) => p === container || cheerio.contains(container as never, p as never));
-    if (inside.length > 2) return null; // reached the grid of several plans without finding this card's name
+    if (inside.length > 2) return planFromFlatSequence($, priceEl, container, allPriceEls); // the grid of several plans: names may be flat siblings
 
     const names = planNamesIn($, container);
     if (names.length > 0) {
@@ -315,6 +359,59 @@ function planFromCard($: cheerio.CheerioAPI, priceEl: AnyNode, allPriceEls: AnyN
     node = (container as { parent?: AnyNode | null }).parent ?? null;
   }
   return null;
+}
+
+/**
+ * Some pricing grids are FLAT: one container whose direct children repeat the same run for every plan -
+ * name, description, price, billing note, button - with no card element wrapping a plan (Pipedrive). The
+ * climb-to-a-card approach cannot work there, so a plan's name is read as the nearest PRECEDING sibling
+ * that is a short, plausible name, stopping at the previous plan's price. It is only trusted when every
+ * price of the container gets a name and all those names differ: otherwise nothing is emitted.
+ */
+function planFromFlatSequence($: cheerio.CheerioAPI, priceEl: AnyNode, container: AnyNode, allPriceEls: AnyNode[]): PlanPrice | null {
+  const tokenInfo = findPriceTokens(joinSplitCents(normalizeWhitespace($(priceEl).text())))[0];
+  if (!tokenInfo) return null;
+  const kids = ((container as { children?: AnyNode[] }).children ?? []).filter((c) => (c as { type?: string }).type === "tag");
+  const holds = (kid: AnyNode, price: AnyNode) => kid === price || cheerio.contains(kid as never, price as never);
+  const anchorOf = (price: AnyNode) => kids.findIndex((k) => holds(k, price));
+  const group = allPriceEls.filter((p) => anchorOf(p) !== -1);
+  if (group.length < 2) return null;
+
+  const nameFor = (price: AnyNode): string | null => {
+    for (let i = anchorOf(price) - 1; i >= 0; i -= 1) {
+      const kid = kids[i]!;
+      const text = cleanFlatName($, kid);
+      if (text.length === 0) continue;
+      if (group.some((g) => holds(kid, g))) return null; // reached the previous plan: this one has no name of its own
+      if (isPlausibleName(text) && text.split(/\s+/).length <= 3) return text;
+    }
+    return null;
+  };
+
+  const names = group.map(nameFor);
+  if (names.some((n) => n === null)) return null;
+  if (new Set(names.map((n) => slug(n!))).size !== names.length) return null;
+
+  const idx = anchorOf(priceEl);
+  const name = names[group.indexOf(priceEl)]!;
+  let period: "month" | "year" | null = null;
+  for (let i = idx; i < Math.min(kids.length, idx + 6) && period === null; i += 1) {
+    if (i > idx && group.some((g) => holds(kids[i]!, g))) break; // the next plan starts here
+    const text = normalizeWhitespace($(kids[i]!).text());
+    if (text.length <= 120) period = i === idx ? detectPeriod(text, tokenInfo.token) : detectPeriodInNote(text);
+  }
+  return { name, amount: tokenInfo.amount, currency: tokenInfo.currency, period, token: tokenInfo.token };
+}
+
+function cleanFlatName($: cheerio.CheerioAPI, el: AnyNode): string {
+  const $clone = $(el).clone();
+  $clone.find(BADGE_CHILD).remove();
+  // A wrapper often holds the name next to a tagline ("Essential" + "Now with AI"): the heading inside it,
+  // when there is one, is the name.
+  const heading = normalizeWhitespace($clone.find(NAME_SELECTOR).first().text());
+  const text = heading.length >= 2 ? heading : normalizeWhitespace($clone.text());
+  const stripped = stripBadgeWords(text);
+  return stripped.length >= 2 ? stripped : text;
 }
 
 function periodNear($: cheerio.CheerioAPI, priceEl: AnyNode, card: AnyNode, token: string): "month" | "year" | null {

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { cleanBody } from "./structuredData.js";
-import { extractPricingPlans, planToEntity, plansToEntities } from "./pricingPlans.js";
+import { detectPeriod, detectPeriodInNote, extractPricingPlans, planToEntity, plansToEntities } from "./pricingPlans.js";
 
 /**
  * Phase 29 C3: the pricing extractor is measured, not just unit tested. Every fixture in
@@ -100,5 +100,22 @@ describe("plansToEntities (history replay)", () => {
   it("adds the period to the key only for a plan the page lists more than once", () => {
     const entities = plansToEntities([plan("Pro", "month", 10), plan("Pro", "year", 96), plan("Team", "month", 30)]);
     expect(entities.map((e) => e.key)).toEqual(["plan:pro:month", "plan:pro:year", "plan:team"]);
+  });
+});
+
+describe("billing period notes (Pipedrive replay)", () => {
+  it("reads the period of the headline price, not the one written after another amount in the same note", () => {
+    const note = "One payment of CA$ 228 per seat/year Per seat per month, billed annually";
+    expect(detectPeriodInNote(note)).toBe("month");
+    expect(detectPeriod("CA$ 19 " + note, "CA$ 19")).toBe("month");
+  });
+
+  it("still reads a plain note, and a price with no period at all", () => {
+    expect(detectPeriodInNote("billed annually")).toBe("year");
+    expect(detectPeriodInNote("Per seat per month")).toBe("month");
+    // An amount written inside the note is some OTHER price (the headline sits in its own element): its period is not ours.
+    expect(detectPeriodInNote("$10 per month")).toBeNull();
+    expect(detectPeriodInNote("Try it free")).toBeNull();
+    expect(detectPeriod("$10 /mo")).toBe("month");
   });
 });
