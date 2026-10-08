@@ -88,6 +88,17 @@ describe("scrubVolatileText", () => {
     const original = "Pro 49 EUR/mo, 20% off until 2026-12-31, 3 seats, 2026 roadmap";
     expect(scrubVolatileText(original)).toBe(original);
   });
+
+  it("neutralizes phone numbers, which change with the visitor's location, in any format", () => {
+    expect(scrubVolatileText("Talk to Sales at +1 (800) 330-4838 today")).toBe("Talk to Sales at [phone] today");
+    expect(scrubVolatileText("Call 0800 112 1306 now")).toBe("Call [phone] now");
+    expect(scrubVolatileText("Llame al 01 8000 930 187.")).toBe("Llame al [phone].");
+  });
+
+  it("does not take amounts, dates or version numbers for phone numbers", () => {
+    const original = "$1 000 000 000 raised, 12.345.678 users, v2.10.4 released 2026-12-31, 10 000 seats";
+    expect(scrubVolatileText(original)).toBe(original);
+  });
 });
 
 describe("CheerioExtractor with main-content hashing", () => {

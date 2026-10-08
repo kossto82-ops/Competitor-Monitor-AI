@@ -206,6 +206,10 @@ Se pidió arreglar la lectura de planes de Pipedrive y Zoho. **Pipedrive devuelv
 - Corpus: 19 páginas, precisión y recall 1,000 (dos fixtures nuevas: rejilla plana y mismo nombre en dos productos).
 - **Registro del piloto:** el worker y el programador se reiniciaron el 2026-10-07 a las 09:57 UTC para cargar `EXTRACTOR_VERSION = 8`; el siguiente escaneo de cada página es una línea base sin eventos (el piloto había arrancado a las 09:45 UTC con la versión 7).
 
+### Piloto de precios: revisión a las 22 h y extractor v9 (2026-10-08)
+
+Resultado a las 22,6 h: 95 escaneos correctos, 13 eventos, **todos `CONTENT_CHANGE` de severidad baja y todos ruido**, ninguno de precio. Brevo (9): el servidor devuelve a veces un "Loading content..." en lugar de la página, y se leía como un cambio. Mailchimp (4): el teléfono de ventas varía con la IP del visitante. Arreglos (`EXTRACTOR_VERSION = 9`): una página cuyo texto es solo un placeholder de carga es un escaneo no verificado (fallo, sin cambio inferido); los teléfonos (9-15 dígitos, nunca importes ni fechas) se neutralizan como texto volátil. Piloto reiniciado el 2026-10-08 con v9: el siguiente escaneo de cada página es línea base.
+
 ### Fase D — Signals y priorización explicable (2-3 semanas)
 
 Tablas `Entity/EntityVersion`, `Signal/SignalEvidence` (promoción solo por reglas sobre eventos verificados), prioridad explicable (magnitud, recencia, frecuencia, nº de competidores, categoría estratégica elegida por el cliente, relevancia del competidor, significancia histórica; desglose por factor, pesos configurables y versionados; **importance** separada de **confidence**), alertas con niveles definidos por reglas observables, deduplicación y explicación obligatoria, primer dashboard "qué debes saber hoy". Errores: E27, E28, E16 (sesión), E33.

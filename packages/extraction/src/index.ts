@@ -7,6 +7,7 @@ export {
   extractMainContent,
   cleanBody,
   scrubVolatileText,
+  isLoadingPlaceholder,
   EXTRACTOR_VERSION,
   extractJsonLdEntities,
   extractGenericPriceEntities,

@@ -32,8 +32,9 @@ export function extractVisibleText($: cheerio.CheerioAPI): string {
  *   6 = named plan offers, split cents, configurator totals ignored (Phase 29 triage on 8 real sites)
  *   7 = plan keys no longer include the billing period unless a page lists a plan twice (history replay)
  *   8 = flat plan grids (Pipedrive), notes with a second price, same-name plans with different prices dropped
+ *   9 = phone numbers are volatile text (sales numbers vary by visitor location); loading placeholders are unverified
  */
-export const EXTRACTOR_VERSION = 8;
+export const EXTRACTOR_VERSION = 9;
 
 // Page chrome that is not the page's own content. Removed everywhere in the document.
 const ALWAYS_NOISE = "nav, [role='navigation'], [role='banner'], [role='contentinfo'], [role='dialog'], [role='alertdialog'], [role='search']";
@@ -52,10 +53,29 @@ const VOLATILE_PATTERNS: [RegExp, string][] = [
   [/(?:©|\(c\)|copyright)\s*(?:19|20)\d{2}(?:\s*[-–]\s*(?:19|20)\d{2})?/gi, "[copyright]"],
 ];
 
+// Sales phone numbers change with the visitor's location (Mailchimp shows a different one per IP). At
+// least 9 digits, and never the continuation of a longer number or an amount ("$1 000 000 000").
+const PHONE_PATTERN = /\+?\(?\d{1,4}\)?(?:[\s.-]\(?\d{2,4}\)?){2,4}(?!\d)/g;
+
+function scrubPhoneNumbers(text: string): string {
+  return text.replace(PHONE_PATTERN, (match, offset: number) => {
+    const digits = match.replace(/\D/g, "").length;
+    const before = text.slice(0, offset).trimEnd().slice(-1);
+    if (digits < 9 || digits > 15 || /[\d$€£.,]/.test(before)) return match;
+    return "[phone]";
+  });
+}
+
 export function scrubVolatileText(text: string): string {
   let out = text;
   for (const [pattern, replacement] of VOLATILE_PATTERNS) out = out.replace(pattern, replacement);
-  return normalizeWhitespace(out);
+  return normalizeWhitespace(scrubPhoneNumbers(out));
+}
+
+/** A page whose whole text is a loading message: the server answered before the content was built. */
+export function isLoadingPlaceholder(text: string): boolean {
+  const t = text.replace(/[\u200b-\u200f\u2060\ufeff]/g, "").trim();
+  return t.length > 0 && t.length <= 60 && /^(?:loading|please wait|just a moment)\b/i.test(t);
 }
 
 export interface MainContent {

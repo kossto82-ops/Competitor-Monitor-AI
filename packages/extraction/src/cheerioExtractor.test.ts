@@ -78,6 +78,14 @@ describe("CheerioExtractor", () => {
     expect(result.errorMessage).toMatch(/too little readable content/);
   });
 
+  it("treats a page that is only a loading placeholder as an unverified scan", async () => {
+    for (const body of ["Loading content... ‌", "Please wait"]) {
+      const result = await new CheerioExtractor(fetchReturning(`<html><body><div>${body}</div></body></html>`)).extract({ url: "https://competitor.test/" });
+      expect(result.errorMessage).toMatch(/loading placeholder/);
+      expect(result.contentHash).toBeNull();
+    }
+  });
+
   it("does not take a server-rendered app with real text in its root for a shell", async () => {
     const html = `<html><body><div id="root"><h1>Pricing</h1><p>${FILLER}</p></div></body></html>`;
     const result = await new CheerioExtractor(fetchReturning(html)).extract({ url: "https://competitor.test/" });

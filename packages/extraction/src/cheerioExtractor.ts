@@ -10,6 +10,7 @@ import {
   extractJsonLdEntities,
   extractMainContent,
   extractVisibleText,
+  isLoadingPlaceholder,
   looksLikeJsShell,
 } from "./structuredData.js";
 import { extractPricingPlans, plansToEntities } from "./pricingPlans.js";
@@ -111,6 +112,12 @@ export class CheerioExtractor implements Extractor {
 
       const warnings: string[] = [];
       let confidence = 1;
+
+      if (isLoadingPlaceholder(visibleText) || isLoadingPlaceholder(wholeBodyText)) {
+        // The server answered with its "Loading content..." stand-in (Brevo does so on some loads). That is
+        // not the page: comparing it with the real one reported a change every few hours.
+        return this.failure(url, page.finalUrl, page.status, "The page returned only a loading placeholder instead of its content; the scan is unverified.", durationMs);
+      }
 
       if (looksLikeJsShell($, wholeBodyText)) {
         // Phase 29 C4: an empty application shell is not a page we observed. Comparing its skeleton with
