@@ -19,7 +19,8 @@ function Test-Alive($name) {
   $pidFile = Join-Path $dir "$name.pid"
   if (-not (Test-Path $pidFile)) { return $false }
   $p = Get-Process -Id ([int](Get-Content $pidFile)) -ErrorAction SilentlyContinue
-  return [bool]$p
+  # After a reboot Windows reuses process ids: a pid file may now point at an unrelated program.
+  return [bool]$p -and (@("node", "powershell", "pwsh", "redis-server") -contains $p.ProcessName)
 }
 
 function Start-Detached($name, $file, $arguments, $workDir) {
