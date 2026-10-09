@@ -23,6 +23,7 @@ export async function listSourceHealthForOrg(organizationId: string, now: Date =
     include: { competitor: { select: { id: true, name: true, isActive: true } } },
     orderBy: { createdAt: "asc" },
   });
+  const recentScans = await recentVerificationByUrl(organizationId, urls.map((u) => u.id), now);
   return urls.map((u) => ({
     id: u.id,
     url: u.url,
@@ -35,8 +36,39 @@ export async function listSourceHealthForOrg(organizationId: string, now: Date =
     lastAttemptAt: u.lastAttemptAt,
     consecutiveFailureCount: u.consecutiveFailureCount,
     disabledAt: u.disabledAt,
-    health: deriveSourceHealth(u, now),
+    health: deriveSourceHealth({ ...u, recentScans: recentScans.get(u.id) }, now),
   }));
+}
+
+const RECENT_SCANS_WINDOW = 10;
+const RECENT_SCANS_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+
+/**
+ * How many of each source's last scans could not be verified. Looks at the last week only, so a source
+ * fixed a week ago is not judged by old captures, and bounded so that one organization cannot make the
+ * page read an unbounded number of rows.
+ */
+async function recentVerificationByUrl(
+  organizationId: string,
+  monitoredUrlIds: string[],
+  now: Date,
+): Promise<Map<string, { total: number; unverified: number }>> {
+  const result = new Map<string, { total: number; unverified: number }>();
+  if (monitoredUrlIds.length === 0) return result;
+  const snapshots = await prisma.snapshot.findMany({
+    where: { organizationId, monitoredUrlId: { in: monitoredUrlIds }, fetchedAt: { gte: new Date(now.getTime() - RECENT_SCANS_LOOKBACK_MS) } },
+    select: { monitoredUrlId: true, verificationState: true },
+    orderBy: { fetchedAt: "desc" },
+    take: monitoredUrlIds.length * RECENT_SCANS_WINDOW * 4,
+  });
+  for (const snapshot of snapshots) {
+    const entry = result.get(snapshot.monitoredUrlId) ?? { total: 0, unverified: 0 };
+    if (entry.total >= RECENT_SCANS_WINDOW) continue;
+    entry.total += 1;
+    if (snapshot.verificationState === "FAILED_TO_VERIFY") entry.unverified += 1;
+    result.set(snapshot.monitoredUrlId, entry);
+  }
+  return result;
 }
 
 export interface SourceAlert {

@@ -10,13 +10,19 @@
  *              (more than STALE_CADENCE_MULTIPLE x the configured cadence, never less than 48 h),
  *              whether or not the latest attempts failed.
  * - DEGRADED : the latest attempt(s) failed, but the last good observation is still recent.
+ * - PARTIAL  : scans succeed, but most of the recent ones could not be verified (the page did not show
+ *              what we compare, e.g. a price configurator, or it alternates between two layouts), so
+ *              changes are only detected on the few scans that could be compared.
  * - HEALTHY  : the latest attempt succeeded and the data is fresh.
  */
-export const SOURCE_HEALTH_STATES = ["HEALTHY", "DEGRADED", "STALE", "PENDING", "PAUSED", "DISABLED"] as const;
+export const SOURCE_HEALTH_STATES = ["HEALTHY", "DEGRADED", "PARTIAL", "STALE", "PENDING", "PAUSED", "DISABLED"] as const;
 export type SourceHealthState = (typeof SOURCE_HEALTH_STATES)[number];
 
 export const STALE_CADENCE_MULTIPLE = 3;
 export const STALE_MIN_MS = 48 * 60 * 60_000;
+/** PARTIAL needs at least this many recent scans, and at least this share of them unverified. */
+export const PARTIAL_MIN_SCANS = 6;
+export const PARTIAL_UNVERIFIED_SHARE = 0.5;
 
 export interface SourceHealthInput {
   isActive: boolean;
@@ -26,6 +32,8 @@ export interface SourceHealthInput {
   lastAttemptAt: Date | null;
   scanFrequencyMinutes: number;
   createdAt: Date;
+  /** The most recent scans' outcomes (up to ~10); when absent the verification share is not judged. */
+  recentScans?: { total: number; unverified: number };
 }
 
 export interface SourceHealth {
@@ -62,6 +70,13 @@ export function deriveSourceHealth(source: SourceHealthInput, now: Date = new Da
     return {
       state: "DEGRADED",
       reason: `The last ${source.consecutiveFailureCount} scan attempt(s) failed.`,
+    };
+  }
+  const recent = source.recentScans;
+  if (recent && recent.total >= PARTIAL_MIN_SCANS && recent.unverified / recent.total >= PARTIAL_UNVERIFIED_SHARE) {
+    return {
+      state: "PARTIAL",
+      reason: `${recent.unverified} of the last ${recent.total} scans could not be verified (the page did not show comparable content), so changes are only detected on the scans that could.`,
     };
   }
   return { state: "HEALTHY", reason: "The latest scan succeeded." };

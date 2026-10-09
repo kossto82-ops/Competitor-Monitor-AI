@@ -9,7 +9,7 @@ import { SourceHealthStateBadge, SOURCE_HEALTH_DISPLAY } from "@/components/app/
 import { formatRelativeTime } from "@/lib/formatTime";
 
 // Most urgent first: sources that are not being monitored at all, then the ones whose data is old.
-const SEVERITY_ORDER: SourceHealthState[] = ["DISABLED", "STALE", "DEGRADED", "PENDING", "PAUSED", "HEALTHY"];
+const SEVERITY_ORDER: SourceHealthState[] = ["DISABLED", "STALE", "DEGRADED", "PARTIAL", "PENDING", "PAUSED", "HEALTHY"];
 
 export default async function SourcesPage() {
   const session = await getSession();
@@ -40,7 +40,7 @@ export default async function SourcesPage() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
             {SEVERITY_ORDER.map((state) => (
               <Card key={state} className="px-4 py-3">
                 <p className="text-2xl font-semibold text-slate-900">{counts[state]}</p>

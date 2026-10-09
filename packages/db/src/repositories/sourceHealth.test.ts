@@ -75,6 +75,46 @@ describe.skipIf(!reachable)("source health and stuck-job sweeper (Phase 29 B4)",
       expect(alerts[0]?.competitorName).toBe("Rival");
     });
 
+    it("marks a source PARTIAL when most of its recent scans could not be verified, from the last scans only", async () => {
+      const org = await makeOrg("partial");
+      const rival = await createCompetitor(org.id, { name: "Configurator" });
+      const fresh = { lastSuccessfulScanAt: minutesAgo(30), lastAttemptAt: minutesAgo(30) };
+      const flapping = await addUrl(org.id, rival.id, "flapping", fresh);
+      const steady = await addUrl(org.id, rival.id, "steady", fresh);
+      const recovered = await addUrl(org.id, rival.id, "recovered", fresh);
+      let minute = 0;
+      const scan = async (urlId: string, state: "NO_CHANGE" | "FAILED_TO_VERIFY", ageMinutes: number) => {
+        minute += 1;
+        const job = await prisma.monitoringJob.create({ data: { organizationId: org.id, monitoredUrlId: urlId, status: "COMPLETED" } });
+        await prisma.snapshot.create({
+          data: {
+            organizationId: org.id,
+            monitoredUrlId: urlId,
+            monitoringJobId: job.id,
+            extractionMethod: "CHEERIO",
+            verificationState: state,
+            normalizedContent: "x",
+            confidence: 1,
+            fetchedAt: minutesAgo(ageMinutes + minute / 100),
+          },
+        });
+      };
+      for (let i = 0; i < 10; i++) await scan(flapping.id, i < 8 ? "FAILED_TO_VERIFY" : "NO_CHANGE", 10 + i);
+      for (let i = 0; i < 10; i++) await scan(steady.id, i < 2 ? "FAILED_TO_VERIFY" : "NO_CHANGE", 10 + i);
+      // Old trouble (older than the last 10 scans) does not count against a source that works now.
+      for (let i = 0; i < 10; i++) await scan(recovered.id, "NO_CHANGE", 10 + i);
+      for (let i = 0; i < 20; i++) await scan(recovered.id, "FAILED_TO_VERIFY", 100 + i);
+
+      const rows = await listSourceHealthForOrg(org.id);
+      const row = (id: string) => rows.find((r) => r.id === id)!;
+      expect(row(flapping.id).health.state).toBe("PARTIAL");
+      expect(row(flapping.id).health.reason).toContain("8 of the last 10");
+      expect(row(steady.id).health.state).toBe("HEALTHY");
+      expect(row(recovered.id).health.state).toBe("HEALTHY");
+      // PARTIAL is shown on the sources page but is not an alert.
+      expect(await listSourcesNeedingAttention(org.id)).toEqual([]);
+    });
+
     it("is tenant-scoped", async () => {
       const a = await makeOrg("iso-a");
       const b = await makeOrg("iso-b");

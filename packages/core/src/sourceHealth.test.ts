@@ -17,6 +17,26 @@ function source(overrides: Partial<SourceHealthInput> = {}): SourceHealthInput {
   };
 }
 
+describe("deriveSourceHealth: partly verifiable sources", () => {
+  it("is PARTIAL when most of the recent scans could not be verified, and says how many", () => {
+    const health = deriveSourceHealth(source({ recentScans: { total: 10, unverified: 8 } }), now);
+    expect(health.state).toBe("PARTIAL");
+    expect(health.reason).toContain("8 of the last 10");
+  });
+
+  it("is HEALTHY with a minority of unverified scans, with too few scans to judge, or when not told", () => {
+    expect(deriveSourceHealth(source({ recentScans: { total: 10, unverified: 4 } }), now).state).toBe("HEALTHY");
+    expect(deriveSourceHealth(source({ recentScans: { total: 3, unverified: 3 } }), now).state).toBe("HEALTHY");
+    expect(deriveSourceHealth(source(), now).state).toBe("HEALTHY");
+  });
+
+  it("is PARTIAL from exactly half, and never hides a stronger state", () => {
+    expect(deriveSourceHealth(source({ recentScans: { total: 10, unverified: 5 } }), now).state).toBe("PARTIAL");
+    expect(deriveSourceHealth(source({ recentScans: { total: 10, unverified: 9 }, consecutiveFailureCount: 2 }), now).state).toBe("DEGRADED");
+    expect(deriveSourceHealth(source({ recentScans: { total: 10, unverified: 9 }, lastSuccessfulScanAt: hoursAgo(200) }), now).state).toBe("STALE");
+  });
+});
+
 describe("deriveSourceHealth", () => {
   it("is HEALTHY after a recent successful scan", () => {
     expect(deriveSourceHealth(source(), now).state).toBe("HEALTHY");

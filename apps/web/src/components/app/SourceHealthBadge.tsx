@@ -4,6 +4,7 @@ import { Badge, type BadgeTone } from "@/components/ui/Badge";
 export const SOURCE_HEALTH_DISPLAY: Record<SourceHealthState, { label: string; tone: BadgeTone }> = {
   HEALTHY: { label: "Healthy", tone: "green" },
   DEGRADED: { label: "Failing", tone: "amber" },
+  PARTIAL: { label: "Partly verifiable", tone: "amber" },
   STALE: { label: "Stale", tone: "red" },
   PENDING: { label: "Not scanned yet", tone: "gray" },
   PAUSED: { label: "Paused", tone: "amber" },
