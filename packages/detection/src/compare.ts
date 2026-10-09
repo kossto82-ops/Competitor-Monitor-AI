@@ -131,7 +131,13 @@ export function compareSnapshots(prior: PriorSnapshotData | null, current: Curre
   // (the price digits of a PRICE_CHANGE, the card of a PRODUCT_ADDED) are not repeated as a vague
   // content change, but text that changed for any OTHER reason is no longer hidden just because some
   // entity event exists on the same page.
-  if (current.contentHash !== prior.contentHash) {
+  // A page the server sometimes sends with "Loading content..." in place of sections and sometimes fully
+  // built is in two different load states: the text of one has blocks the other lacks, and none of that is
+  // the page changing. When the two scans show a different NUMBER of placeholders (a page can keep one
+  // permanently and lazy-load others), the text is not compared (entity events above still are); scans
+  // in the same load state compare normally.
+  const sameLoadState = countLoadingPlaceholders(prior.normalizedContent) === countLoadingPlaceholders(current.normalizedContent);
+  if (current.contentHash !== prior.contentHash && sameLoadState) {
     const diff = diffText(prior.normalizedContent, current.normalizedContent);
     const hints = buildExplanationHints(changeEvents, prior.entities, current.entities);
     const unexplained = diff.hunks.filter((hunk) => !isHunkExplained(hunk, hints));
@@ -497,6 +503,14 @@ function buildExplanationHints(events: ChangeEventDraft[], priorEntities: Extrac
     }
   }
   return { words, amounts, wholeLabels };
+}
+
+// Brevo serves its pricing page with "Loading content..." instead of the feature lists on most requests and
+// fully built on others: comparing the two states reported a change every few hours (see compareSnapshots).
+const LOADING_PLACEHOLDER = /\bloading content\b|\bloading\s*(?:\.{3}|\u2026)|\bplease wait\s*(?:\.{3}|\u2026)/gi;
+
+function countLoadingPlaceholders(text: string): number {
+  return text.match(LOADING_PLACEHOLDER)?.length ?? 0;
 }
 
 function isHunkExplained(hunk: TextHunk, hints: ExplanationHints): boolean {

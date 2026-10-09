@@ -393,6 +393,58 @@ describe("compareSnapshots - promotion added/changed/removed", () => {
       expect(event.evidenceExcerpt).not.toContain("Our platform helps teams");
     });
 
+    describe("lazy-loaded sections (Brevo replay)", () => {
+      const BUILT = "Email and SMS send transactional messages. Drag and drop editor crafts polished emails fast. Templates jumpstart campaigns for your industry.";
+      const run = (before: string, after: string) =>
+        compareSnapshots(
+          makePrior({ contentHash: "h1", normalizedContent: before }),
+          makeCurrent({ contentHash: "h2", normalizedContent: after }),
+        ).changeEvents.filter((e) => e.changeType === "CONTENT_CHANGE");
+
+      it("does not compare text between a scan that shows a loading placeholder and one that is fully built, in either direction", () => {
+        const loading = `${FILLER} Compare plans Loading content... \u200c Starter Sign up. Contact sales for help.`;
+        const built = `${FILLER} Compare plans Starter Sign up. ${BUILT} Features included in Starter: unlimited contacts. Contact sales for help.`;
+        expect(run(loading, built)).toEqual([]);
+        expect(run(built, loading)).toEqual([]);
+      });
+
+      it("keeps comparing price entities when the load states differ", () => {
+        const loading = `${FILLER} Loading content... Pro Plan 49 EUR per month.`;
+        const built = `${FILLER} ${BUILT} Pro Plan 59 EUR per month.`;
+        const result = compareSnapshots(
+          makePrior({ contentHash: "h1", structuredDataHash: "s1", normalizedContent: loading, entities: [priceEntity({ value: "49.00" })] }),
+          makeCurrent({ contentHash: "h2", structuredDataHash: "s2", normalizedContent: built, entities: [priceEntity({ value: "59.00" })] }),
+        );
+        expect(result.changeEvents.some((e) => e.changeType === "PRICE_CHANGE")).toBe(true);
+      });
+
+      it("counts placeholders: a page that always keeps one is still in a different state when another section is loading", () => {
+        const stays = "Join customers worldwide. Loading content... Footer.";
+        const a = `${FILLER} Loading content... Starter Sign up. ${stays}`;
+        const b = `${FILLER} Starter Sign up. Features included in Starter: unlimited contacts. ${stays}`;
+        expect(run(a, b)).toEqual([]);
+        expect(run(b, a)).toEqual([]);
+      });
+
+      it("compares normally when both scans still show the placeholder", () => {
+        const a = `${FILLER} Free trial lasts 14 days. Loading content... Contact sales for help.`;
+        const b = `${FILLER} Free trial lasts 30 days. Loading content... Contact sales for help.`;
+        expect(run(a, b)).toHaveLength(1);
+      });
+
+      it("still reports a real change inside the section when both scans have it built", () => {
+        const a = `${FILLER} Compare plans ${BUILT} Contact sales for help.`;
+        const b = `${FILLER} Compare plans ${BUILT.replace("industry", "region")} Contact sales for help.`;
+        expect(run(a, b)).toHaveLength(1);
+      });
+
+      it("does not take ordinary text that merely contains the word loading for a placeholder", () => {
+        const a = `${FILLER} Fast loading times for every page. Contact sales for help.`;
+        const b = `${FILLER} Fast loading times for every site. Contact sales for help.`;
+        expect(run(a, b)).toHaveLength(1);
+      });
+    });
+
     it("still reports unrelated text that changed on the same page as a price change (it used to be suppressed)", () => {
       const prior = makePrior({
         contentHash: "h1",
