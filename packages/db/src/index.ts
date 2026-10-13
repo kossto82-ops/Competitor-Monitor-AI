@@ -19,3 +19,4 @@ export * from "./repositories/intelligence.js";
 export * from "./repositories/patterns.js";
 
 export * from "./repositories/sourceHealth.js";
+export * from "./repositories/entityHistory.js";

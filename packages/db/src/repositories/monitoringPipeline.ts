@@ -1,5 +1,6 @@
 import type { ComparisonResult, ExtractionResult } from "@cma/core";
 import { prisma } from "../client.js";
+import { recordEntityObservations } from "./entityHistory.js";
 
 export async function createRunningMonitoringJob(organizationId: string, monitoredUrlId: string) {
   return prisma.monitoringJob.create({
@@ -112,8 +113,9 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
       },
     });
 
+    const createdEvents: { id: string; changeType: string; entityKey: string | null }[] = [];
     for (const draft of comparison.changeEvents) {
-      await tx.changeEvent.create({
+      const event = await tx.changeEvent.create({
         data: {
           organizationId,
           monitoredUrlId,
@@ -130,6 +132,19 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
           percentageChange: draft.percentageChange,
           evidenceExcerpt: draft.evidenceExcerpt,
         },
+      });
+      createdEvents.push({ id: event.id, changeType: event.changeType, entityKey: event.entityKey });
+    }
+
+    // Phase 29 D1: only a scan we can trust feeds the history of the page's plans and prices.
+    if (fetchSucceeded && comparison.verificationState !== "FAILED_TO_VERIFY") {
+      await recordEntityObservations(tx, {
+        organizationId,
+        monitoredUrlId,
+        snapshotId: snapshot.id,
+        observedAt: snapshot.fetchedAt,
+        entities: extraction.extractedEntities,
+        events: createdEvents,
       });
     }
 

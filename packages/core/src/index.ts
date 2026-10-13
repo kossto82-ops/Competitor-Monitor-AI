@@ -8,3 +8,4 @@ export * from "./period.js";
 export * from "./sourceHealth.js";
 export * from "./money.js";
 export * from "./market.js";
+export * from "./entityHistory.js";

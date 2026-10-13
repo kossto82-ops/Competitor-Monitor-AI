@@ -220,6 +220,18 @@ Resultado a las 22,6 h: 95 escaneos correctos, 13 eventos, **todos `CONTENT_CHAN
 
 Tablas `Entity/EntityVersion`, `Signal/SignalEvidence` (promoción solo por reglas sobre eventos verificados), prioridad explicable (magnitud, recencia, frecuencia, nº de competidores, categoría estratégica elegida por el cliente, relevancia del competidor, significancia histórica; desglose por factor, pesos configurables y versionados; **importance** separada de **confidence**), alertas con niveles definidos por reglas observables, deduplicación y explicación obligatoria, primer dashboard "qué debes saber hoy". Errores: E27, E28, E16 (sesión), E33.
 
+#### Fase D: partes y avance
+
+| Parte | Contenido | Estado |
+|---|---|---|
+| D1 | `Entity` / `EntityVersion`: cada plan, precio o promoción seguido entre escaneos, con su historial de versiones (por qué existe cada versión y qué evento la explica) | hecho (2026-10-13) |
+| D2 | `Signal` / `SignalEvidence`: promoción por reglas observables desde eventos verificados (precio, plan nuevo o retirado, promoción), agrupando el ruido de `CONTENT_CHANGE` | pendiente |
+| D3 | Prioridad explicable: importancia (magnitud, recencia, frecuencia, nº de competidores, categoría estratégica, relevancia del competidor, significancia histórica) con desglose por factor y pesos versionados; importancia separada de confianza | pendiente |
+| D4 | Alertas por reglas, deduplicación y explicación obligatoria (E27) | pendiente |
+| D5 | Dashboard "qué debes saber hoy" con jerarquía por importancia (E28) y, aparte, sesión (E16) y roles (E33) | pendiente |
+
+**D1 (2026-10-13).** `Entity` (una fila por fuente y clave: tipo, etiqueta, estado ACTIVE/ABSENT, primera y última vez vista) y `EntityVersion` (una fila por estado distinto: valor, moneda, texto, instantánea, y el origen: `FIRST_SEEN`, `CHANGE` enlazada al evento que la explica, `BASELINE` cuando el valor difiere pero ningún evento lo explica porque cambió el extractor, el mercado o el diseño, y `REAPPEARED`). Las reglas viven en `planEntityObservation` (`@cma/core`, función pura con tests) y se aplican dentro de la misma transacción que guarda el snapshot, solo para escaneos verificados: un escaneo sin verificar o con la descarga fallida no enseña nada, y uno sin ninguna entidad seguible no marca nada como ausente. Las entidades `GENERIC` (precios hash por contexto, solo evidencia) no se siguen. Migración `20261013000000_phase29_entity_history` (solo añade tablas). `backfillEntityHistory` reconstruye el historial desde los snapshots existentes con las mismas reglas; aplicada al piloto (153 snapshots verificados): Brevo 48 entidades, Mailchimp 6, Zoho 8 (una ausente), Klaviyo 3, Freshworks 3, y **ninguna versión espuria de cambio o baseline en 153 escaneos**, lo que confirma que la identidad de las claves es estable.
+
 ### Fases posteriores (no implementar todavía)
 
 | Fase | Contenido | Condición |

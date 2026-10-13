@@ -248,6 +248,8 @@ model MonitoredUrl {
   @@index([organizationId])
   @@index([competitorId])
   @@map("monitored_urls")
+
+  entities Entity[]
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +312,8 @@ model Snapshot {
   @@index([organizationId])
   @@index([monitoredUrlId, fetchedAt])
   @@map("snapshots")
+
+  entityVersions EntityVersion[]
 }
 
 model ExtractedEntity {
@@ -331,6 +335,67 @@ model ExtractedEntity {
   @@index([key])
   @@index([organizationId])
   @@map("extracted_entities")
+}
+
+// Phase 29 D1: a plan, price or promotion followed across scans (the throwaway ExtractedEntity rows belong
+// to one snapshot). One row per (source, key); its history is EntityVersion.
+enum EntityStatus {
+  ACTIVE
+  ABSENT
+}
+
+enum EntityVersionOrigin {
+  FIRST_SEEN
+  CHANGE
+  BASELINE
+  REAPPEARED
+}
+
+model Entity {
+  id             String       @id @default(cuid())
+  organizationId String
+  monitoredUrlId String
+  monitoredUrl   MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+
+  type  EntityType
+  key   String
+  label String
+
+  status      EntityStatus @default(ACTIVE)
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+  absentSince DateTime?
+
+  versions EntityVersion[]
+
+  @@unique([monitoredUrlId, key])
+  @@index([organizationId])
+  @@map("entities")
+}
+
+model EntityVersion {
+  id             String @id @default(cuid())
+  organizationId String
+  entityId       String
+  entity         Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  snapshotId String
+  snapshot   Snapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  observedAt DateTime
+
+  value    String?
+  currency String?
+  raw      String
+  origin   EntityVersionOrigin
+
+  // The verified change that explains this version, when there is one (BASELINE versions have none).
+  changeEventId String?
+  changeEvent   ChangeEvent? @relation(fields: [changeEventId], references: [id], onDelete: SetNull)
+
+  @@index([entityId, observedAt])
+  @@index([organizationId])
+  @@index([snapshotId])
+  @@map("entity_versions")
 }
 
 model ChangeEvent {
@@ -365,6 +430,8 @@ model ChangeEvent {
   // instead of showing the customer the same change twice.
   @@unique([currentSnapshotId, changeType, fieldPath])
   @@map("change_events")
+
+  entityVersions EntityVersion[]
 }
 
 // ---------------------------------------------------------------------------
