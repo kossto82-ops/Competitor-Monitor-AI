@@ -1,6 +1,7 @@
 import type { ComparisonResult, ExtractionResult } from "@cma/core";
 import { prisma } from "../client.js";
 import { recordEntityObservations } from "./entityHistory.js";
+import { promoteSignals } from "./signals.js";
 
 export async function createRunningMonitoringJob(organizationId: string, monitoredUrlId: string) {
   return prisma.monitoringJob.create({
@@ -113,7 +114,7 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
       },
     });
 
-    const createdEvents: { id: string; changeType: string; entityKey: string | null }[] = [];
+    const createdEvents: Awaited<ReturnType<typeof tx.changeEvent.create>>[] = [];
     for (const draft of comparison.changeEvents) {
       const event = await tx.changeEvent.create({
         data: {
@@ -133,7 +134,7 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
           evidenceExcerpt: draft.evidenceExcerpt,
         },
       });
-      createdEvents.push({ id: event.id, changeType: event.changeType, entityKey: event.entityKey });
+      createdEvents.push(event);
     }
 
     // Phase 29 D1: only a scan we can trust feeds the history of the page's plans and prices.
@@ -146,6 +147,16 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
         entities: extraction.extractedEntities,
         events: createdEvents,
       });
+      // Phase 29 D2: verified events are promoted to signals in the same transaction, by deterministic rules.
+      if (createdEvents.length > 0) {
+        const source = await tx.monitoredUrl.findUniqueOrThrow({ where: { id: monitoredUrlId }, select: { competitorId: true } });
+        await promoteSignals(tx, {
+          organizationId,
+          competitorId: source.competitorId,
+          events: createdEvents,
+          labels: new Map(extraction.extractedEntities.map((e) => [e.key, e.label])),
+        });
+      }
     }
 
     await tx.monitoringJob.update({

@@ -1,4 +1,4 @@
-import { comparePrices, parseAmount, type ChangeEventDraft, type ComparisonResult, type ExtractedEntity, type Severity } from "@cma/core";
+import { comparePrices, parseAmount, RENAME_MARKER, REVERT_MARKER, type ChangeEventDraft, type ComparisonResult, type ExtractedEntity, type Severity } from "@cma/core";
 import { diffText, type TextHunk } from "./textDiff.js";
 
 export interface PriorSnapshotData {
@@ -577,7 +577,7 @@ function flagOscillations(events: ChangeEventDraft[], recent: RecentChangeEvent[
       ...event,
       severity: "LOW",
       confidence: Math.round(event.confidence * 0.5 * 100) / 100,
-      evidenceExcerpt: `${event.evidenceExcerpt} Reverts the change detected ${hours}h ago (possible A/B test or regional pricing).`,
+      evidenceExcerpt: `${event.evidenceExcerpt} ${REVERT_MARKER} ${hours}h ago (possible A/B test or regional pricing).`,
     };
   });
 }
@@ -645,7 +645,7 @@ function linkPossibleRenames(events: ChangeEventDraft[], priorEntities: Extracte
 
     const oldName = planNameOf(priorByKey.get(r.entityKey!)!.label);
     const newName = planNameOf(currentByKey.get(a.entityKey!)!.label);
-    const note = `Possibly renamed: "${oldName}" -> "${newName}" (same price, currency and billing period).`;
+    const note = `${RENAME_MARKER} "${oldName}" -> "${newName}" (same price, currency and billing period).`;
     replacements.set(r, { ...r, severity: "LOW", confidence: Math.round(r.confidence * 0.8 * 100) / 100, evidenceExcerpt: `${r.evidenceExcerpt} ${note}` });
     replacements.set(a, { ...a, severity: "LOW", confidence: Math.round(a.confidence * 0.8 * 100) / 100, evidenceExcerpt: `${a.evidenceExcerpt} ${note}` });
   }

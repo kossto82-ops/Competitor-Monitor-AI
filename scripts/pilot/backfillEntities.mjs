@@ -23,4 +23,11 @@ for (const s of sources) {
   const by = (o) => versions.filter((v) => v.origin === o).length;
   console.log(`${s.competitorName.padEnd(16)} entities ${String(history.length).padStart(3)} (absent ${history.filter((e) => e.status === "ABSENT").length})  versions: first ${by("FIRST_SEEN")}, change ${by("CHANGE")}, baseline ${by("BASELINE")}, reappeared ${by("REAPPEARED")}`);
 }
+
+// Signals (Phase 29 D2) are promoted from the change events that already exist.
+const signals = await db.backfillSignals(owner.organizationId);
+console.log(`\nsignals: ${signals.events} events -> ${signals.created} created, ${signals.attached} attached to an existing signal, ${signals.skipped} not promoted`);
+for (const s of await db.listSignals(owner.organizationId)) {
+  console.log(`  ${s.occurredAt.toISOString().slice(0, 16)} ${s.competitorName.padEnd(10)} ${s.kind.padEnd(14)} ${s.title} (confidence ${s.confidence}, evidence ${s.evidenceCount})`);
+}
 await db.prisma.$disconnect();

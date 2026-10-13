@@ -250,6 +250,7 @@ model MonitoredUrl {
   @@map("monitored_urls")
 
   entities Entity[]
+  signals  Signal[]
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +399,83 @@ model EntityVersion {
   @@map("entity_versions")
 }
 
+// Phase 29 D2: something a person should know about, promoted by a named, versioned rule from verified
+// change events. Every signal keeps the events that back it (SignalEvidence) and says what kind of claim
+// it makes (epistemicLevel: a fact we observed, not an interpretation or an inference).
+enum SignalKind {
+  PRICE_INCREASE
+  PRICE_DECREASE
+  PLAN_ADDED
+  PLAN_REMOVED
+  PROMOTION_STARTED
+  PROMOTION_CHANGED
+  PROMOTION_ENDED
+  CONTENT_UPDATE
+}
+
+enum EpistemicLevel {
+  FACT
+  INTERPRETATION
+  INFERENCE
+}
+
+enum SignalEvidenceRole {
+  PRIMARY
+  SUPPORTING
+}
+
+model Signal {
+  id             String       @id @default(cuid())
+  organizationId String
+  competitorId   String
+  monitoredUrlId String
+  monitoredUrl   MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+
+  entityKey String?
+
+  kind           SignalKind
+  epistemicLevel EpistemicLevel @default(FACT)
+  title          String
+  summary        String
+
+  oldValue         String?
+  newValue         String?
+  currency         String?
+  percentageChange Float?
+  confidence       Float
+
+  ruleId      String
+  ruleVersion Int
+  // Promoting the same event again, or the same day's text changes, lands on the same row.
+  dedupeKey   String
+  occurredAt  DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  evidence SignalEvidence[]
+
+  @@unique([organizationId, dedupeKey])
+  @@index([organizationId, occurredAt])
+  @@index([monitoredUrlId, occurredAt])
+  @@map("signals")
+}
+
+model SignalEvidence {
+  id             String @id @default(cuid())
+  organizationId String
+  signalId       String
+  signal         Signal @relation(fields: [signalId], references: [id], onDelete: Cascade)
+
+  changeEventId String
+  changeEvent   ChangeEvent @relation(fields: [changeEventId], references: [id], onDelete: Cascade)
+  role          SignalEvidenceRole
+
+  @@unique([signalId, changeEventId])
+  @@index([organizationId])
+  @@index([changeEventId])
+  @@map("signal_evidence")
+}
+
 model ChangeEvent {
   id             String       @id @default(cuid())
   organizationId String
@@ -432,6 +510,7 @@ model ChangeEvent {
   @@map("change_events")
 
   entityVersions EntityVersion[]
+  signalEvidence SignalEvidence[]
 }
 
 // ---------------------------------------------------------------------------

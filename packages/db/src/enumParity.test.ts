@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CHANGE_TYPES, ENTITY_TYPES, EXTRACTION_METHODS, JOB_STATUSES, PLANS, REPORT_STATUSES, SEVERITIES, VERIFICATION_STATES } from "@cma/core";
-import { ChangeType, EntityType, ExtractionMethod, JobStatus, Plan, ReportStatus, Severity, VerificationState } from "../generated/client/index.js";
+import { CHANGE_TYPES, ENTITY_TYPES, EPISTEMIC_LEVELS, SIGNAL_KINDS, EXTRACTION_METHODS, JOB_STATUSES, PLANS, REPORT_STATUSES, SEVERITIES, VERIFICATION_STATES } from "@cma/core";
+import { ChangeType, EntityType, EpistemicLevel, SignalKind, ExtractionMethod, JobStatus, Plan, ReportStatus, Severity, VerificationState } from "../generated/client/index.js";
 
 /**
  * Phase 29 C5 (E37): `@cma/core` and the Prisma schema each declare these enums by hand. Nothing tied
@@ -14,6 +14,8 @@ describe("core enums match the Prisma schema", () => {
   it("ChangeType", () => same(CHANGE_TYPES, ChangeType));
   it("Severity", () => same(SEVERITIES, Severity));
   it("EntityType", () => same(ENTITY_TYPES, EntityType));
+  it("SignalKind", () => same(SIGNAL_KINDS, SignalKind));
+  it("EpistemicLevel", () => same(EPISTEMIC_LEVELS, EpistemicLevel));
   it("ExtractionMethod", () => same(EXTRACTION_METHODS, ExtractionMethod));
   it("VerificationState", () => same(VERIFICATION_STATES, VerificationState));
   it("JobStatus", () => same(JOB_STATUSES, JobStatus));
