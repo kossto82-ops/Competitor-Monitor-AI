@@ -38,7 +38,7 @@ function safeConnection(overrides: Record<string, unknown> = {}) {
 describe("/api/ai-connections", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
   });
 
   describe("GET", () => {

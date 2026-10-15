@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { updateMonitoredUrlInputSchema } from "@cma/core";
 import { deleteMonitoredUrlIfSafe, getMonitoredUrlDetailForOrg, updateMonitoredUrl } from "@cma/db";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 
@@ -24,6 +24,7 @@ export async function GET(_request: Request, { params }: RouteParams): Promise<N
 export async function PATCH(request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_competitors");
     const { urlId } = await params;
     const body = updateMonitoredUrlInputSchema.parse(await request.json());
 
@@ -45,6 +46,7 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
 export async function DELETE(_request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_competitors");
     const { urlId } = await params;
     await deleteMonitoredUrlIfSafe(session.organizationId, urlId);
     return new NextResponse(null, { status: 204 });

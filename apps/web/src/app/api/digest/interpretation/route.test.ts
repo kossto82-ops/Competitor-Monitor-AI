@@ -35,7 +35,7 @@ const { GET, POST } = await import("./route.js");
 describe("/api/digest/interpretation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
     mockGetOrCreateDigestAiInterpretationSlot.mockResolvedValue({ id: "interp-1", status: "PENDING" });
     mockMarkDigestAiInterpretationFailed.mockResolvedValue(undefined);
     mockQueueClose.mockResolvedValue(undefined);

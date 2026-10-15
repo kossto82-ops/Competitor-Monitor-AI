@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { updateOrganizationSettingsInputSchema } from "@cma/core";
 import { getOrganizationById, updateOrganizationSettings } from "@cma/db";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 
 /** Section 18: daily report enabled/disabled, recipient override, timezone - nothing else yet. */
@@ -18,6 +18,7 @@ export async function GET(): Promise<NextResponse> {
 export async function PATCH(request: Request): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_org_settings");
     const body = updateOrganizationSettingsInputSchema.parse(await request.json());
     const organization = await updateOrganizationSettings(session.organizationId, body);
     return NextResponse.json({ organization });

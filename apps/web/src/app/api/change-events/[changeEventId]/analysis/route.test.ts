@@ -45,7 +45,7 @@ function makeChangeEvent(overrides: Record<string, unknown> = {}) {
 describe("/api/change-events/[changeEventId]/analysis", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
     mockGetChangeEventForOrg.mockResolvedValue(makeChangeEvent());
     mockGetOrCreatePendingAiAnalysis.mockResolvedValue({ id: "analysis-1", status: "PENDING" });
     mockMarkAiAnalysisFailed.mockResolvedValue(undefined);

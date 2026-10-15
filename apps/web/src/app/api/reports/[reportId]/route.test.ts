@@ -22,7 +22,7 @@ function makeParams(reportId: string) {
 describe("/api/reports/[reportId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
   });
 
   it("GET returns the report scoped to the caller's organization", async () => {

@@ -1,7 +1,9 @@
+import { can, permissionsOf, whoCan } from "@cma/core";
 import { getOrganizationById, getUserForOrg } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { MarketSettingsForm } from "@/components/app/MarketSettingsForm";
+import { Alert } from "@/components/ui/Alert";
 
 export default async function AccountSettingsPage() {
   const session = await getSession();
@@ -33,7 +35,11 @@ export default async function AccountSettingsPage() {
         </CardContent>
       </Card>
 
-      <MarketSettingsForm initialLocale={organization?.marketLocale ?? null} />
+      {can(session.role, "manage_org_settings") ? (
+        <MarketSettingsForm initialLocale={organization?.marketLocale ?? null} />
+      ) : (
+        <Alert tone="info">Only {whoCan("manage_org_settings")} can change the market the competitors' pages are read in (now: {organization?.marketLocale ?? "the sites' default"}).</Alert>
+      )}
 
       <Card>
         <CardHeader>
@@ -45,6 +51,8 @@ export default async function AccountSettingsPage() {
             <dd className="col-span-2 text-slate-900">{user?.email}</dd>
             <dt className="text-slate-400">Role</dt>
             <dd className="col-span-2 text-slate-900">{user?.role}</dd>
+            <dt className="text-slate-400">You can</dt>
+            <dd className="col-span-2 text-slate-900">{permissionsOf(user?.role).map((p) => p.replace(/_/g, " ")).join(", ") || "read only"}</dd>
           </dl>
         </CardContent>
       </Card>

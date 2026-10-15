@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAiConnectionInputSchema } from "@cma/core";
 import { createAiConnection, listAiConnectionsForOrg } from "@cma/db";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 
 /**
@@ -22,6 +22,7 @@ export async function GET(): Promise<NextResponse> {
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_ai_credentials");
     const body = createAiConnectionInputSchema.parse(await request.json());
     const connection = await createAiConnection(session.organizationId, body);
     return NextResponse.json({ connection }, { status: 201 });

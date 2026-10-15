@@ -31,7 +31,7 @@ function makeParams(competitorId: string) {
 describe("/api/competitors/[competitorId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
   });
 
   it("GET returns the competitor + monitored URLs scoped to the caller's org", async () => {

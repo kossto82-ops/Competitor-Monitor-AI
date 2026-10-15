@@ -94,7 +94,7 @@ beforeEach(() => {
   m.createUserSession.mockResolvedValue({ id: "sess-1", expiresAt: new Date() });
   vi.clearAllMocks();
   vi.unstubAllEnvs();
-  m.requireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+  m.requireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
 });
 
 describe("login: only FAILED attempts count, and a lockout is a 429 with Retry-After", () => {
@@ -222,7 +222,7 @@ describe("cost-bearing actions are refused before any side effect", () => {
   });
 
   it("quotas are per organization: the key carries the session org, never anything from the request", async () => {
-    m.requireSession.mockResolvedValue({ userId: "u", organizationId: "org-777" });
+    m.requireSession.mockResolvedValue({ userId: "u", organizationId: "org-777", role: "OWNER" });
     m.getMonitoredUrlForOrg.mockResolvedValue({ id: "url-1", organizationId: "org-777" });
     m.createPendingMonitoringJob.mockResolvedValue({ id: "job-1" });
     m.queueAdd.mockResolvedValue({ id: "job-1" });

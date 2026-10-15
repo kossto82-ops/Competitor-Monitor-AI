@@ -13,3 +13,4 @@ export * from "./signalRules.js";
 export * from "./importance.js";
 export * from "./alertRules.js";
 export * from "./alertDelivery.js";
+export * from "./permissions.js";

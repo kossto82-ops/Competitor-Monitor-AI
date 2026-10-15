@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDecryptedAiConnectionForOrg } from "@cma/db";
 import { testAiConnection, isAiProviderKind, UnsupportedAiProviderError } from "@cma/ai";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 
 interface RouteParams {
@@ -19,6 +19,7 @@ interface RouteParams {
 export async function POST(_request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_ai_credentials");
     const { id } = await params;
     const config = await getDecryptedAiConnectionForOrg(session.organizationId, id);
 

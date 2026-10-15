@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { monitoredUrlInputSchema } from "@cma/core";
 import { countMonitoredUrlsForOrg, createMonitoredUrl, listMonitoredUrlsForOrg } from "@cma/db";
 import { resolveAndValidateHost, SsrfBlockedError } from "@cma/security";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 import { quotaExceeded } from "@/lib/limitResponse";
@@ -25,6 +25,7 @@ export async function GET(_request: Request, { params }: RouteParams): Promise<N
 export async function POST(request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_competitors");
     const { competitorId } = await params;
     const body = monitoredUrlInputSchema.parse(await request.json());
 

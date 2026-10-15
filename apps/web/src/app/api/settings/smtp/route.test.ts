@@ -40,7 +40,7 @@ const safe = (o: Record<string, unknown> = {}) => ({
 describe("/api/settings/smtp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
     delete process.env["CMA_EMAIL_SMTP_HOST"];
   });
 

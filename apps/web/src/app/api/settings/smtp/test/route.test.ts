@@ -38,7 +38,7 @@ const CONFIG = {
 describe("POST /api/settings/smtp/test", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
     mockGetConfig.mockResolvedValue(CONFIG);
     mockGetRecipient.mockResolvedValue("owner@customer.test");
     mockCreateProvider.mockReturnValue({ send: mockSend });

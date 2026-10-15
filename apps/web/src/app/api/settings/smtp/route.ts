@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { upsertSmtpConnectionInputSchema } from "@cma/core";
 import { deleteSmtpConnectionForOrg, getSmtpConnectionForOrg, upsertSmtpConnectionForOrg } from "@cma/db";
 import { createEmailProviderFromEnv, isEmailProviderConfigured } from "@cma/notifications";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 
 /**
@@ -14,6 +14,7 @@ import { toErrorResponse } from "@/lib/apiError";
 export async function GET(): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_smtp");
     const connection = await getSmtpConnectionForOrg(session.organizationId);
     return NextResponse.json({
       connection,
@@ -28,6 +29,7 @@ export async function GET(): Promise<NextResponse> {
 export async function PUT(request: Request): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_smtp");
     const body = upsertSmtpConnectionInputSchema.parse(await request.json());
     const connection = await upsertSmtpConnectionForOrg(session.organizationId, body);
     return NextResponse.json({ connection });
@@ -39,6 +41,7 @@ export async function PUT(request: Request): Promise<NextResponse> {
 export async function DELETE(): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_smtp");
     await deleteSmtpConnectionForOrg(session.organizationId);
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -65,7 +65,7 @@ describe("POST /api/auth/logout (Phase 29 D5c, E16)", () => {
 
 describe("POST /api/auth/logout-all", () => {
   it("ends every other session of the signed-in user and keeps the current one", async () => {
-    mockRequireSession.mockResolvedValue({ userId: "u1", organizationId: "o1", sessionId: "sess-1" });
+    mockRequireSession.mockResolvedValue({ userId: "u1", organizationId: "o1", sessionId: "sess-1", role: "OWNER" });
     mockRevokeAllUserSessions.mockResolvedValue(3);
     const response = await logoutAll();
     expect(response.status).toBe(200);

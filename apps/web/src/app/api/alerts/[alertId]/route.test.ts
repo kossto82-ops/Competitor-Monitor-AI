@@ -22,7 +22,7 @@ const patch = (body: unknown) => new Request("http://test", { method: "PATCH", b
 describe("/api/alerts/[alertId] (Phase 29 D5)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
   });
 
   it("marks an alert as seen, always scoped to the session's organization", async () => {

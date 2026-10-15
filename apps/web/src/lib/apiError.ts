@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { ConflictError, NotFoundError } from "@cma/db";
-import { UnauthorizedError } from "./currentSession";
+import { ForbiddenError, UnauthorizedError } from "./currentSession";
 
 /**
  * Generic error responses to clients, full detail only in server logs -
@@ -11,6 +11,9 @@ import { UnauthorizedError } from "./currentSession";
 export function toErrorResponse(err: unknown): NextResponse {
   if (err instanceof UnauthorizedError) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (err instanceof ForbiddenError) {
+    return NextResponse.json({ error: "You do not have permission to do this.", code: "FORBIDDEN" }, { status: 403 });
   }
   if (err instanceof NotFoundError) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });

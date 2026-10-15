@@ -1,3 +1,4 @@
+import type { UserRole } from "../../generated/client/index.js";
 import { prisma } from "../client.js";
 
 /**
@@ -35,16 +36,24 @@ export async function createUserSession(input: { userId: string; organizationId:
  * idle limit. Records that it was seen.
  */
 export async function isUserSessionActive(sessionId: string, userId: string, organizationId: string, now: Date = new Date()): Promise<boolean> {
-  const row = await prisma.userSession.findUnique({ where: { id: sessionId }, include: { user: { select: { id: true, organizationId: true } } } });
-  if (!row || row.userId !== userId || row.organizationId !== organizationId) return false;
-  if (row.user.id !== userId || row.user.organizationId !== organizationId) return false;
-  if (row.revokedAt !== null) return false;
-  if (row.expiresAt.getTime() <= now.getTime()) return false;
-  if (now.getTime() - row.lastSeenAt.getTime() > SESSION_IDLE_MS) return false;
+  return (await getUserSessionAccess(sessionId, userId, organizationId, now)) !== null;
+}
+
+/**
+ * Like `isUserSessionActive`, and also says which role the user holds in the database at this moment. The role
+ * is read here on every request and never carried in the token, so demoting somebody takes effect at once.
+ */
+export async function getUserSessionAccess(sessionId: string, userId: string, organizationId: string, now: Date = new Date()): Promise<{ role: UserRole } | null> {
+  const row = await prisma.userSession.findUnique({ where: { id: sessionId }, include: { user: { select: { id: true, organizationId: true, role: true } } } });
+  if (!row || row.userId !== userId || row.organizationId !== organizationId) return null;
+  if (row.user.id !== userId || row.user.organizationId !== organizationId) return null;
+  if (row.revokedAt !== null) return null;
+  if (row.expiresAt.getTime() <= now.getTime()) return null;
+  if (now.getTime() - row.lastSeenAt.getTime() > SESSION_IDLE_MS) return null;
   if (now.getTime() - row.lastSeenAt.getTime() > TOUCH_EVERY_MS) {
     await prisma.userSession.update({ where: { id: sessionId }, data: { lastSeenAt: now } }).catch(() => undefined);
   }
-  return true;
+  return { role: row.user.role };
 }
 
 /** Ends one session (logout). Idempotent: ending an unknown or already ended one is not an error. */

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getMonitoredUrlForOrg, createPendingMonitoringJob, markMonitoringJobFailed } from "@cma/db";
 import { createMonitoringQueue } from "@cma/queue";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 import { checkLimit } from "@/lib/limitResponse";
@@ -47,6 +47,7 @@ interface RouteParams {
 export async function POST(_request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "run_scans_and_ai");
     const { urlId } = await params;
     const monitoredUrl = await getMonitoredUrlForOrg(session.organizationId, urlId);
 

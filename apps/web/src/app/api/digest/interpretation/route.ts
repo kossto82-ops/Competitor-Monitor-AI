@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDigestAiInterpretationForOrg, getOrCreateDigestAiInterpretationSlot, markDigestAiInterpretationFailed } from "@cma/db";
 import { addJobReplacingTerminal, createDigestInterpretationQueue, type DigestInterpretationJobPayload } from "@cma/queue";
 import { DIGEST_PROMPT_VERSION } from "@cma/ai";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 import { checkLimit } from "@/lib/limitResponse";
@@ -53,6 +53,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "run_scans_and_ai");
     const days = parseDays(new URL(request.url).searchParams.get("days"));
     if (days === null) {
       return NextResponse.json({ error: "days must be one of 7, 30, 90" }, { status: 400 });

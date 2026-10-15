@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAiConnectionInputSchema } from "@cma/core";
 import { testAiConnection } from "@cma/ai";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 import { checkLimit } from "@/lib/limitResponse";
@@ -15,7 +15,8 @@ import { checkLimit } from "@/lib/limitResponse";
  */
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const session = await requireSession(); // any authenticated member may test a configuration before saving it
+    const session = await requireSession();
+    assertPermission(session, "manage_ai_credentials"); // any authenticated member may test a configuration before saving it
     const limited = await checkLimit(`ai-test:${session.organizationId}`, readLimits().aiTestPerHour, 3600, "Too many connection tests. Please try again later.");
     if (limited) return limited;
     const body = createAiConnectionInputSchema.parse(await request.json());

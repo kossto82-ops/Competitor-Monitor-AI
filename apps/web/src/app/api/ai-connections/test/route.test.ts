@@ -22,7 +22,7 @@ function req(body: unknown) {
 describe("POST /api/ai-connections/test", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
   });
 
   it("tests the given (not-yet-saved) credentials and returns the classified result", async () => {

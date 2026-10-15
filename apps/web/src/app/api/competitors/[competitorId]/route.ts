@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { updateCompetitorInputSchema } from "@cma/core";
 import { deleteCompetitorIfSafe, getCompetitorForOrg, listMonitoredUrlsWithStatusForOrg, updateCompetitor } from "@cma/db";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 
 interface RouteParams {
@@ -26,6 +26,7 @@ export async function GET(_request: Request, { params }: RouteParams): Promise<N
 export async function PATCH(request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_competitors");
     const { competitorId } = await params;
     const body = updateCompetitorInputSchema.parse(await request.json());
     const competitor = await updateCompetitor(session.organizationId, competitorId, body);
@@ -39,6 +40,7 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
 export async function DELETE(_request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_competitors");
     const { competitorId } = await params;
     await deleteCompetitorIfSafe(session.organizationId, competitorId);
     return new NextResponse(null, { status: 204 });

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { competitorInputSchema } from "@cma/core";
 import { countCompetitorsForOrg, createCompetitor, listCompetitorsForOrg } from "@cma/db";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 import { quotaExceeded } from "@/lib/limitResponse";
@@ -19,6 +19,7 @@ export async function GET(): Promise<NextResponse> {
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_competitors");
     const body = competitorInputSchema.parse(await request.json());
 
     const { competitorsPerOrg } = readLimits();

@@ -28,7 +28,7 @@ function makeParams(id: string) {
 describe("POST /api/ai-connections/[id]/test", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
   });
 
   it("tests an existing connection scoped to the caller's organization, and never returns the decrypted key", async () => {

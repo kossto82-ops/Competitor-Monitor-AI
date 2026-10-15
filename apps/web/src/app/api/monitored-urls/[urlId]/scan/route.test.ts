@@ -43,7 +43,7 @@ function makeParams(urlId: string) {
 describe("POST /api/monitored-urls/[urlId]/scan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
     mockGetMonitoredUrlForOrg.mockResolvedValue({ id: "url-1", organizationId: "org-1", url: "https://x.test" });
     mockCreatePendingMonitoringJob.mockResolvedValue({ id: "pending-job-1", status: "PENDING" });
     mockMarkMonitoringJobFailed.mockResolvedValue({ id: "pending-job-1", status: "FAILED" });

@@ -29,7 +29,7 @@ function makeParams(urlId: string) {
 describe("/api/monitored-urls/[urlId]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });
+    mockRequireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1", role: "OWNER" });
   });
 
   it("GET returns the monitored URL scoped to the caller's org", async () => {

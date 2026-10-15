@@ -8,7 +8,7 @@ import {
 } from "@cma/db";
 import { addJobReplacingTerminal, createAiAnalysisQueue } from "@cma/queue";
 import { isSupportedAiChangeType, PROMPT_VERSION } from "@cma/ai";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 import { checkLimit } from "@/lib/limitResponse";
@@ -55,6 +55,7 @@ export async function GET(_request: Request, { params }: RouteParams): Promise<N
 export async function POST(_request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "run_scans_and_ai");
     const { changeEventId } = await params;
     const changeEvent = await getChangeEventForOrg(session.organizationId, changeEventId);
     if (!changeEvent) throw new NotFoundError("ChangeEvent");

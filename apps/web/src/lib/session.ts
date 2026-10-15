@@ -3,11 +3,17 @@ import { SignJWT, jwtVerify } from "jose";
 export const SESSION_COOKIE_NAME = "cma_session";
 export const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
-export interface SessionPayload {
+/** What the signed token carries. */
+export interface SessionToken {
   userId: string;
   organizationId: string;
   /** The server-side session row this token names (Phase 29 D5c): the row, not the token, decides if it is still valid. */
   sessionId: string;
+}
+
+/** A verified, still-active session. The role is read from the database on each request, never from the token (Phase 29 D5d). */
+export interface SessionPayload extends SessionToken {
+  role: string;
 }
 
 /**
@@ -34,7 +40,7 @@ function getSecretKey(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-export async function createSessionToken(payload: SessionPayload): Promise<string> {
+export async function createSessionToken(payload: SessionToken): Promise<string> {
   return new SignJWT({ userId: payload.userId, organizationId: payload.organizationId, sid: payload.sessionId })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
@@ -42,7 +48,7 @@ export async function createSessionToken(payload: SessionPayload): Promise<strin
     .sign(getSecretKey());
 }
 
-export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
+export async function verifySessionToken(token: string): Promise<SessionToken | null> {
   try {
     const { payload } = await jwtVerify(token, getSecretKey());
     // A token without a session id (issued before sessions were kept on the server) is no longer accepted.

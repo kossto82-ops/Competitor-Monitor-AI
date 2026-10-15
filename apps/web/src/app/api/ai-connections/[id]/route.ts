@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { updateAiConnectionInputSchema } from "@cma/core";
 import { deleteAiConnection, getAiConnectionForOrg, updateAiConnection } from "@cma/db";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 
 interface RouteParams {
@@ -23,6 +23,7 @@ export async function GET(_request: Request, { params }: RouteParams): Promise<N
 export async function PATCH(request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_ai_credentials");
     const { id } = await params;
     const body = updateAiConnectionInputSchema.parse(await request.json());
     const connection = await updateAiConnection(session.organizationId, id, body);
@@ -35,6 +36,7 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
 export async function DELETE(_request: Request, { params }: RouteParams): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_ai_credentials");
     const { id } = await params;
     await deleteAiConnection(session.organizationId, id);
     return new NextResponse(null, { status: 204 });

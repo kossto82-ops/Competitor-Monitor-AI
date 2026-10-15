@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getEnabledSmtpConfigForOrg, getReportRecipientEmailForOrg } from "@cma/db";
 import { classifyEmailSendError, createTenantSmtpProvider } from "@cma/notifications";
-import { requireSession } from "@/lib/currentSession";
+import { assertPermission, requireSession } from "@/lib/currentSession";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 import { checkLimit } from "@/lib/limitResponse";
@@ -17,6 +17,7 @@ import { checkLimit } from "@/lib/limitResponse";
 export async function POST(): Promise<NextResponse> {
   try {
     const session = await requireSession();
+    assertPermission(session, "manage_smtp");
     const limited = await checkLimit(`smtp-test:${session.organizationId}`, readLimits().smtpTestPerHour, 3600, "Too many test emails. Please try again later.");
     if (limited) return limited;
     const config = await getEnabledSmtpConfigForOrg(session.organizationId);
