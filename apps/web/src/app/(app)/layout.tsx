@@ -8,7 +8,8 @@ import { Topbar } from "@/components/app/Topbar";
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
   if (!session) {
-    redirect("/login");
+    // A cookie that no longer names an active session is cleared on the way, so /login does not bounce back here.
+    redirect("/api/auth/expired");
   }
 
   const organization = await getOrganizationById(session.organizationId);

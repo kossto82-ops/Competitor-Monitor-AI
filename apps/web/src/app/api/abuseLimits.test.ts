@@ -28,6 +28,7 @@ const m = vi.hoisted(() => ({
   createMonitoredUrl: vi.fn(),
   updateMonitoredUrl: vi.fn(),
   queueAdd: vi.fn(),
+  createUserSession: vi.fn(),
 }));
 
 vi.mock("@/lib/currentSession", async (orig) => ({ ...(await orig<typeof import("@/lib/currentSession")>()), requireSession: () => m.requireSession() }));
@@ -36,6 +37,7 @@ vi.mock("@/lib/session", async (orig) => ({ ...(await orig<typeof import("@/lib/
 vi.mock("@cma/db", async (orig) => ({
   ...(await orig<typeof import("@cma/db")>()),
   findUserByEmail: m.findUserByEmail,
+  createUserSession: m.createUserSession,
   createOrganizationWithOwner: m.createOrganizationWithOwner,
   getMonitoredUrlForOrg: m.getMonitoredUrlForOrg,
   createPendingMonitoringJob: m.createPendingMonitoringJob,
@@ -89,6 +91,7 @@ const mockedHit = vi.mocked(hit);
 const mockedPeek = vi.mocked(peek);
 
 beforeEach(() => {
+  m.createUserSession.mockResolvedValue({ id: "sess-1", expiresAt: new Date() });
   vi.clearAllMocks();
   vi.unstubAllEnvs();
   m.requireSession.mockResolvedValue({ userId: "user-1", organizationId: "org-1" });

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { loginInputSchema } from "@cma/core";
-import { findUserByEmail } from "@cma/db";
+import { createUserSession, findUserByEmail } from "@cma/db";
 import { verifyPassword } from "@/lib/password";
-import { createSessionToken, SESSION_COOKIE_NAME, SESSION_DURATION_SECONDS } from "@/lib/session";
+import { createSessionToken, SESSION_COOKIE_NAME, SESSION_DURATION_SECONDS, sessionCookieOptions } from "@/lib/session";
 import { toErrorResponse } from "@/lib/apiError";
 import { readLimits } from "@/lib/limits";
 import { hit, peek, reset } from "@/lib/rateLimit";
@@ -49,15 +49,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     await reset(ipKey);
 
-    const token = await createSessionToken({ userId: user.id, organizationId: user.organizationId });
+    const session = await createUserSession({ userId: user.id, organizationId: user.organizationId, userAgent: request.headers.get("user-agent") });
+    const token = await createSessionToken({ userId: user.id, organizationId: user.organizationId, sessionId: session.id });
     const response = NextResponse.json({ userId: user.id, organizationId: user.organizationId });
-    response.cookies.set(SESSION_COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: process.env["NODE_ENV"] === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: SESSION_DURATION_SECONDS,
-    });
+    response.cookies.set(SESSION_COOKIE_NAME, token, sessionCookieOptions(SESSION_DURATION_SECONDS));
     return response;
   } catch (err) {
     return toErrorResponse(err);

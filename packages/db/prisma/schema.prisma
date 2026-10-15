@@ -188,6 +188,27 @@ model User {
 
   @@index([organizationId])
   @@map("users")
+
+  sessions       UserSession[]
+}
+
+// Phase 29 D5c (E16): a login the server can end. The browser holds a signed token that names one of these
+// rows; every request checks the row, so logging out, signing out everywhere or deleting the user takes effect
+// at once instead of when a 7-day token expires. Never holds the token or any secret.
+model UserSession {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  createdAt      DateTime     @default(now())
+  lastSeenAt     DateTime     @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  userAgent      String?
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("user_sessions")
 }
 
 // ---------------------------------------------------------------------------
