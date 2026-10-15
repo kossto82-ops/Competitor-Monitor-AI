@@ -57,7 +57,7 @@ export function findPriceTokens(text: string): PriceToken[] {
 }
 
 const PRICE_ONLY_REMAINDER =
-  /^(?:[\s/\-–—,.·|*()+:†‡]|\bfor\s+\d+\s+(?:months?|years?)\b|\b(?:from|starting|at|only|just|per|a|an|mo|month|monthly|yr|year|yearly|annually|annual|user|seat|member|each|billed|vat|tax|taxes|excl|incl|and|usd|eur|gbp)\b)*$/i;
+  /^(?:[\s/\-–—,.·|*()+:†‡]|\bfor\s+\d+\s+(?:months?|years?)\b|\b(?:from|starting|at|only|just|per|a|an|mo|month|monthly|yr|year|yearly|annually|annual|user|seat|member|each|billed|vat|tax|taxes|excl|incl|and|usd|eur|gbp)\b|(?:à\s+partir\s+de|a\s+partir\s+de|dès|desde(?:\s+(?:solo|sólo))?|seulement|por|par|al|mois|mes|mensuel(?:le)?s?|mensual(?:es)?|annuel(?:le)?s?|anual(?:es)?|año|ans?|jour|día|ht|ttc|iva|hors\s+taxes?|sin\s+permanencia|sans\s+engagement|monat|monatlich|jährlich)(?![\p{L}]))*$/iu;
 
 /** True when the text is a price and little else ("$49", "$49 / month", "from 29 €"). */
 /**
@@ -81,6 +81,24 @@ function isConfiguratorTotal($: cheerio.CheerioAPI, el: AnyNode): boolean {
     node = (node as { parent?: AnyNode | null }).parent ?? null;
   }
   return false;
+}
+
+/**
+ * True when the element's own parent also holds sentence text next to it (text nodes of its own, not other
+ * elements): a price in a paragraph. A card's price sits among element siblings, so it is not affected.
+ */
+function isInRunningText($: cheerio.CheerioAPI, el: AnyNode): boolean {
+  const parent = (el as { parent?: AnyNode | null }).parent;
+  if (!parent) return false;
+  const ownText = normalizeWhitespace(
+    $(parent)
+      .contents()
+      .toArray()
+      .filter((n) => n.type === "text")
+      .map((n) => (n as { data?: string }).data ?? "")
+      .join(" "),
+  );
+  return (ownText.match(/\p{L}{3,}/gu) ?? []).length >= 4;
 }
 
 // "$5 of mobile messages", "$10 worth of credit": an amount INCLUDED in a plan, not the plan's price.
@@ -109,8 +127,8 @@ export function isPriceOnly(text: string): boolean {
   return PRICE_ONLY_REMAINDER.test(remainder);
 }
 
-const MONTH = /\/\s*(?:mo|month)\b|\bper\s+(?:\w+\s*(?:\/|per)\s*)?month\b|\bmonthly\b|\ba\s+month\b|\bmo\b|\bal\s+mes\b|\/\s*mes\b|\bpar\s+mois\b|\bpro\s+monat\b/i;
-const YEAR = /\/\s*(?:yr|year)\b|\bper\s+(?:\w+\s*(?:\/|per)\s*)?year\b|\byearly\b|\bannual(?:ly)?\b|\ba\s+year\b|\byr\b|\bal\s+a[nñ]o\b|\/\s*a[nñ]o\b|\bpar\s+an\b|\bpro\s+jahr\b/i;
+const MONTH = /\/\s*(?:mois|mes|monat|mese)(?![\p{L}])|\bpor\s+mes\b|\bmensuel(?:le)?s?\b|\bmensual(?:es)?\b|\/\s*(?:mo|month)\b|\bper\s+(?:\w+\s*(?:\/|per)\s*)?month\b|\bmonthly\b|\ba\s+month\b|\bmo\b|\bal\s+mes\b|\/\s*mes\b|\bpar\s+mois\b|\bpro\s+monat\b/iu;
+const YEAR = /\/\s*(?:an|ans|jahr|anno)(?![\p{L}])|\bpor\s+a[nñ]o\b|\bannuel(?:le)?s?\b|\banual(?:es)?\b|\/\s*(?:yr|year)\b|\bper\s+(?:\w+\s*(?:\/|per)\s*)?year\b|\byearly\b|\bannual(?:ly)?\b|\ba\s+year\b|\byr\b|\bal\s+a[nñ]o\b|\/\s*a[nñ]o\b|\bpar\s+an\b|\bpro\s+jahr\b/iu;
 
 /** The billing period written near a price; the first one AFTER the price wins ("$10 /mo billed annually" is monthly). */
 /**
@@ -161,16 +179,16 @@ function readPeriod(normalized: string, token?: string): "month" | "year" | null
 }
 
 const GENERIC_NAME =
-  /^(?:pricing|plans?|our plans?|compare(?: all)? plans?|choose (?:your|a|the) plan|features?|most popular|best value|recommended|popular|monthly|annual(?:ly)?|yearly|billed .*|faq|frequently asked questions|get started|start(?: now| free| for free)?|buy now|sign up|contact(?: us| sales)?|learn more|what'?s included|includes?|everything in .*|all (?:plans|features) include.*)$/i;
+  /^(?:desde(?:\s+(?:solo|sólo))?|(?:à|a)\s+partir\s+de|dès|from|starting at|tarifs?|tarifas?|precios?|prix|planes|formules?|offres?|nos tarifs|nuestras tarifas|nos formules|les plus populaires?|m[aá]s populares?|populaire|mensuel(?:le)?|annuel(?:le)?|mensual|anual|pricing|plans?|our plans?|compare(?: all)? plans?|choose (?:your|a|the) plan|features?|most popular|best value|recommended|popular|monthly|annual(?:ly)?|yearly|billed .*|faq|frequently asked questions|get started|start(?: now| free| for free)?|buy now|sign up|contact(?: us| sales)?|learn more|what'?s included|includes?|everything in .*|all (?:plans|features) include.*)$/i;
 
 const NAME_SELECTOR =
-  "h1, h2, h3, h4, h5, h6, [class*='plan-name'], [class*='plan_name'], [class*='planName'], [class*='tier-name'], [class*='package-name'], [class*='card-title'], [class*='plan-title'], [class*='product-name']";
+  "h1, h2, h3, h4, h5, h6, [class*='plan-name'], [class*='plan_name'], [class*='planName'], [class*='tier-name'], [class*='package-name'], [class*='card-title'], [class*='plan-title'], [class*='product-name'], [class*='headline'], [class*='price_item_description'], [class*='price-item-description'], [class*='tarif'], [class*='offre-name']";
 
 const STRUCK =
   "s, del, strike, [class*='strike'], [class*='line-through'], [class*='old-price'], [class*='was-price'], [class*='original-price'], [class*='price-old'], [class*='crossed']";
 
 // Calls to action sit right next to plan names ("Try it free", "See all features") and are never one.
-const CTA_START = /^(?:see|try|buy|get|start|sign|learn|contact|view|compare|choose|select|book|request|talk|download|watch|explore|read|find)\b/i;
+const CTA_START = /^(?:see|try|buy|get|start|sign|learn|contact|view|compare|choose|select|book|request|talk|download|watch|explore|read|find|r[ée]server|choisir|demander|commencer|d[ée]marrer|d[ée]couvrir|contacter|essayer|essai|souscrire|obtenir|voir|en\s+savoir|commander|appeler|prendre|comenzar|empezar|elegir|contratar|solicitar|pedir|probar|prueba|contactar|ver|saber|reservar|descubrir|conocer|suscribir|llamar|empiece|comience|contrate|elige|w[äa]hlen|buchen|anfragen|testen|jetzt|scegli|richiedi|prova|contatta)(?![\p{L}])/iu;
 
 function isPlausibleName(text: string): boolean {
   const name = normalizeWhitespace(text);
@@ -230,7 +248,9 @@ function cleanPlanName($: cheerio.CheerioAPI, el: AnyNode): string {
     const stripped = stripBadgeWords(text);
     if (stripped.length >= 2) text = stripped;
   }
-  return text;
+  // "Tarif Entrepreneur", "Tarifa Inicial": the word for "plan" is the section's, the name is what follows.
+  const named = /^(?:tarifs?|tarifas?|forfaits?|formules?|offres?|paquetes?|abonnements?)\s+(.{2,})$/i.exec(text);
+  return named ? named[1]!.trim() : text;
 }
 
 function planNamesIn($: cheerio.CheerioAPI, container: AnyNode): NameCandidate[] {
@@ -287,6 +307,7 @@ export function extractPricingPlans($: cheerio.CheerioAPI, $root: cheerio.Cheeri
     if (!isPriceOnly($(el).text())) return;
     if (isConfiguratorTotal($, el)) return;
     if (isIncludedValue($, el)) return;
+    if (isInRunningText($, el)) return;
     // Take the smallest price-only element: skip when a child already is one.
     const childIsPrice = $(el)
       .children()
@@ -301,8 +322,12 @@ export function extractPricingPlans($: cheerio.CheerioAPI, $root: cheerio.Cheeri
   }
 
   // A plan repeated with the SAME price (a sticky copy of a card, a mobile twin) is one plan.
+  // The same plan read from a card (with its billing period) and from a comparison table (without one) is one
+  // plan, and the reading that knows the period is the one kept.
+  const periodKnown = new Set(plans.filter((p) => p.period !== null).map((p) => `${slug(p.name)}:${p.amount}:${p.currency ?? ""}`));
   const seen = new Set<string>();
   const unique = plans.filter((p) => {
+    if (p.period === null && periodKnown.has(`${slug(p.name)}:${p.amount}:${p.currency ?? ""}`)) return false;
     const key = `${slug(p.name)}:${p.period ?? "na"}:${p.amount}:${p.currency ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);

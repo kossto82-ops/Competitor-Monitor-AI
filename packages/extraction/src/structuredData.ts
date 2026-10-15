@@ -33,8 +33,9 @@ export function extractVisibleText($: cheerio.CheerioAPI): string {
  *   7 = plan keys no longer include the billing period unless a page lists a plan twice (history replay)
  *   8 = flat plan grids (Pipedrive), notes with a second price, same-name plans with different prices dropped
  *   9 = phone numbers are volatile text (sales numbers vary by visitor location); loading placeholders are unverified
+ *   10 = Spanish and French pricing pages: "a partir de 59,90 EUR/mes", "49 EUR/mois HT", prices written in prose are not plans
  */
-export const EXTRACTOR_VERSION = 9;
+export const EXTRACTOR_VERSION = 10;
 
 // Page chrome that is not the page's own content. Removed everywhere in the document.
 const ALWAYS_NOISE = "nav, [role='navigation'], [role='banner'], [role='contentinfo'], [role='dialog'], [role='alertdialog'], [role='search']";

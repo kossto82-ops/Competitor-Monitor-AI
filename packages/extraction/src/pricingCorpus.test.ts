@@ -103,6 +103,18 @@ describe("plansToEntities (history replay)", () => {
   });
 });
 
+describe("billing periods and price wording in Spanish and French", () => {
+  it("reads the billing period from the words these pages use", () => {
+    expect(detectPeriod("49,00 €/mes", "49,00 €")).toBe("month");
+    expect(detectPeriod("49€ HT par mois", "49€")).toBe("month");
+    expect(detectPeriod("Tarif mensuel 59,90 €", "59,90 €")).toBe("month");
+    expect(detectPeriod("490€/an", "490€")).toBe("year");
+    expect(detectPeriod("99 € por año", "99 €")).toBe("year");
+    expect(detectPeriod("Abonnement annuel 990 €", "990 €")).toBe("year");
+    expect(detectPeriod("49€ HT", "49€")).toBeNull();
+  });
+});
+
 describe("billing period notes (Pipedrive replay)", () => {
   it("reads the period of the headline price, not the one written after another amount in the same note", () => {
     const note = "One payment of CA$ 228 per seat/year Per seat per month, billed annually";

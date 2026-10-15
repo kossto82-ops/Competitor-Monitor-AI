@@ -297,5 +297,54 @@
       "currency": "USD",
       "period": "month"
     }
-  ]
+  ],
+  "fr-from-price-cards.html": [
+    {
+      "name": "Essentiel",
+      "amount": 59.9,
+      "currency": "EUR",
+      "period": "month"
+    },
+    {
+      "name": "Confort",
+      "amount": 99.9,
+      "currency": "EUR",
+      "period": "month"
+    },
+    {
+      "name": "Premium",
+      "amount": 189.9,
+      "currency": "EUR",
+      "period": "month"
+    }
+  ],
+  "es-split-price-spans.html": [
+    {
+      "name": "BASICO20",
+      "amount": 29.9,
+      "currency": "EUR",
+      "period": "month"
+    },
+    {
+      "name": "PLUS40",
+      "amount": 49.31,
+      "currency": "EUR",
+      "period": "month"
+    }
+  ],
+  "fr-euro-after-yearly.html": [
+    {
+      "name": "Essentiel",
+      "amount": 490,
+      "currency": "EUR",
+      "period": "year"
+    },
+    {
+      "name": "Pro",
+      "amount": 990,
+      "currency": "EUR",
+      "period": "year"
+    }
+  ],
+  "fr-price-in-prose.html": []
 }
