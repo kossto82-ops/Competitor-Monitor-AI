@@ -48,6 +48,8 @@ export interface CompareOptions {
 }
 
 const MIN_PRICES_FOR_CAPABILITY_JUMP = 3;
+/** When at most this share of the prices of one scan also appeared in the other, the page was replaced, not edited. */
+const MAX_SURVIVING_SHARE_FOR_REPLACEMENT = 0.2;
 
 export function compareSnapshots(prior: PriorSnapshotData | null, current: CurrentExtractionData, options: CompareOptions = {}): ComparisonResult {
   const failureReason = describeExtractionFailure(current);
@@ -99,6 +101,28 @@ export function compareSnapshots(prior: PriorSnapshotData | null, current: Curre
     return {
       verificationState: "FAILED_TO_VERIFY",
       reason: `The page no longer shows any readable price (${priorPrices} before); it may be partially rendered or have changed format, so no plan is reported as removed.`,
+      changeEvents: [],
+    };
+  }
+  // Pilot, Zoho: one capture kept a single price out of seven and the detector announced six retired plans;
+  // the next ones would have announced six launches. A page whose set of prices is almost entirely replaced
+  // in one scan is a partial render, a different layout or a different market, not a wave of launches and
+  // retirements. Many prices vanishing is unverified (the last good scan stays the reference, so the page
+  // coming back is simply unchanged); many new ones are a new baseline.
+  const priorKeys = new Set(prior.entities.filter((e) => e.type === "PRICE").map((e) => e.key));
+  const currentKeys = new Set(current.entities.filter((e) => e.type === "PRICE").map((e) => e.key));
+  const surviving = [...currentKeys].filter((key) => priorKeys.has(key)).length;
+  if (currentKeys.size >= MIN_PRICES_FOR_CAPABILITY_JUMP && surviving <= currentKeys.size * MAX_SURVIVING_SHARE_FOR_REPLACEMENT) {
+    return {
+      verificationState: "NO_CHANGE",
+      reason: `Almost every price on the page is new to this source (${currentKeys.size - surviving} of ${currentKeys.size}); the page looks replaced or served in another layout, so this scan is the new baseline, not ${currentKeys.size - surviving} launches.`,
+      changeEvents: [],
+    };
+  }
+  if (priorKeys.size >= MIN_PRICES_FOR_CAPABILITY_JUMP && currentKeys.size < priorKeys.size && surviving <= priorKeys.size * MAX_SURVIVING_SHARE_FOR_REPLACEMENT) {
+    return {
+      verificationState: "FAILED_TO_VERIFY",
+      reason: `Almost every price the page showed before has disappeared at once (${priorKeys.size - surviving} of ${priorKeys.size}); it may be partially rendered or have changed layout, so no plan is reported as removed.`,
       changeEvents: [],
     };
   }

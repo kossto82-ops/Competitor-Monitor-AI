@@ -41,6 +41,12 @@ export type SignalRuleId = keyof typeof SIGNAL_RULE_VERSIONS;
 export const MIN_ENTITY_SIGNAL_CONFIDENCE = 0.6;
 /** Text changes are unspecific by nature (the detector gives them 0.5-0.6); they are grouped per day. */
 export const MIN_CONTENT_SIGNAL_CONFIDENCE = 0.5;
+/**
+ * This many plans added (or removed) from one source in one scan is a page that changed layout or was served
+ * partially, not that many launches or retirements (pilot, Zoho: six "retired plans" in one capture). The
+ * detector now stops most of these upstream; this is the safety net for what still gets through.
+ */
+export const MASS_PLAN_CHANGE_THRESHOLD = 4;
 
 export interface EventForSignal {
   id: string;
@@ -136,8 +142,21 @@ export function deriveSignals(events: EventForSignal[], labels: ReadonlyMap<stri
   const result: SignalDerivation = { drafts: [], skipped: [] };
   const skip = (event: EventForSignal, reason: string) => result.skipped.push({ eventId: event.id, reason });
 
+  const planChangesPerSource = new Map<string, number>();
+  for (const event of events) {
+    if (event.changeType === "PRODUCT_ADDED" || event.changeType === "PRODUCT_REMOVED") {
+      const k = `${event.monitoredUrlId}|${event.changeType}`;
+      planChangesPerSource.set(k, (planChangesPerSource.get(k) ?? 0) + 1);
+    }
+  }
+
   for (const event of events) {
     const name = nameOf(event.entityKey, labels);
+    const massCount = planChangesPerSource.get(`${event.monitoredUrlId}|${event.changeType}`) ?? 0;
+    if (massCount >= MASS_PLAN_CHANGE_THRESHOLD) {
+      skip(event, `${massCount} plans of one source changed in one scan: a layout change or a partial render, not ${massCount} separate launches or retirements`);
+      continue;
+    }
     switch (event.changeType) {
       case "PRICE_CHANGE": {
         if (event.confidence < MIN_ENTITY_SIGNAL_CONFIDENCE) {

@@ -66,6 +66,17 @@ describe("deriveSignals (Phase 29 D2)", () => {
     expect(rename.skipped[0]?.reason).toContain("rename");
   });
 
+  it("does not promote a wave of plans added or removed from one source in one scan, but does promote a few", () => {
+    const wave = (n: number) => Array.from({ length: n }, (_, i) => event({ id: `r${i}`, changeType: "PRODUCT_REMOVED", entityKey: `plan:p${i}`, oldValue: "10.00", newValue: null, percentageChange: null }));
+    const mass = deriveSignals(wave(6));
+    expect(mass.drafts).toEqual([]);
+    expect(mass.skipped).toHaveLength(6);
+    expect(mass.skipped[0]?.reason).toContain("6 plans of one source");
+    expect(deriveSignals(wave(3)).drafts).toHaveLength(3);
+    // another source's retirement in the same batch is counted separately
+    expect(deriveSignals([...wave(3), event({ id: "x", monitoredUrlId: "u2", changeType: "PRODUCT_REMOVED", entityKey: "plan:z", percentageChange: null })]).drafts).toHaveLength(4);
+  });
+
   it("promotes promotion events by their kind", () => {
     const kinds = (changeType: string) => deriveSignals([event({ changeType, entityKey: "promo:trial", oldValue: null, newValue: "14 days free", percentageChange: null })]).drafts[0]?.kind;
     expect(kinds("PROMOTION_ADDED")).toBe("PROMOTION_STARTED");

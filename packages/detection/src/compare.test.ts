@@ -639,6 +639,28 @@ describe("compareSnapshots - promotion added/changed/removed", () => {
       expect(result.reason).toContain("no longer shows any readable price (5 before)");
     });
 
+    it("a page that keeps one price out of seven is unverified, not six retired plans (Zoho replay)", () => {
+      const result = run(plans(7), plans(1));
+      expect(result.verificationState).toBe("FAILED_TO_VERIFY");
+      expect(result.changeEvents).toEqual([]);
+      expect(result.reason).toContain("6 of 7");
+    });
+
+    it("recovering from that, one price back to seven, is a new baseline, not six launches", () => {
+      const result = run(plans(1), plans(7));
+      expect(result.verificationState).toBe("NO_CHANGE");
+      expect(result.changeEvents).toEqual([]);
+      expect(result.reason).toContain("6 of 7");
+    });
+
+    it("a page whose plans were all renamed at once is a new baseline, but a few real changes still report", () => {
+      const renamed = Array.from({ length: 5 }, (_, i) => priceEntity({ key: `plan:new${i}`, label: `New${i}`, value: `${(i + 1) * 10}.00` }));
+      expect(run(plans(5), renamed).verificationState).toBe("NO_CHANGE");
+      const events = run(plans(5), [...plans(4), priceEntity({ key: "plan:extra", label: "Extra", value: "99.00" })]).changeEvents.map((e) => e.changeType);
+      expect(events).toContain("PRODUCT_ADDED");
+      expect(events).toContain("PRODUCT_REMOVED");
+    });
+
     it("still reports a genuinely new plan on a page that already had prices, and a first plan on an empty page", () => {
       expect(run(plans(3), plans(4)).changeEvents.map((e) => e.changeType)).toContain("PRODUCT_ADDED");
       expect(run([], plans(2)).changeEvents.map((e) => e.changeType)).toContain("PRODUCT_ADDED"); // below the threshold: a real launch

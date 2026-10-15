@@ -151,27 +151,29 @@ export async function backfillSignals(organizationId: string): Promise<{ events:
     labelsByUrl.set(e.monitoredUrlId, labels);
   }
   const total = { events: events.length, created: 0, attached: 0, skipped: 0 };
-  for (const event of events) {
+  // One scan's events are promoted together, as in the pipeline: some rules look at the whole scan.
+  const byScan = new Map<string, typeof events>();
+  for (const event of events) byScan.set(event.currentSnapshotId, [...(byScan.get(event.currentSnapshotId) ?? []), event]);
+  for (const scanEvents of byScan.values()) {
+    const first = scanEvents[0]!;
     const result = await prisma.$transaction((tx) =>
       promoteSignals(tx, {
         organizationId,
-        competitorId: event.monitoredUrl.competitorId,
-        events: [
-          {
-            id: event.id,
-            monitoredUrlId: event.monitoredUrlId,
-            changeType: event.changeType,
-            entityKey: event.entityKey,
-            oldValue: event.oldValue,
-            newValue: event.newValue,
-            currency: event.currency,
-            percentageChange: event.percentageChange,
-            confidence: event.confidence,
-            evidenceExcerpt: event.evidenceExcerpt,
-            detectedAt: event.detectedAt,
-          },
-        ],
-        labels: labelsByUrl.get(event.monitoredUrlId),
+        competitorId: first.monitoredUrl.competitorId,
+        events: scanEvents.map((event) => ({
+          id: event.id,
+          monitoredUrlId: event.monitoredUrlId,
+          changeType: event.changeType,
+          entityKey: event.entityKey,
+          oldValue: event.oldValue,
+          newValue: event.newValue,
+          currency: event.currency,
+          percentageChange: event.percentageChange,
+          confidence: event.confidence,
+          evidenceExcerpt: event.evidenceExcerpt,
+          detectedAt: event.detectedAt,
+        })),
+        labels: labelsByUrl.get(first.monitoredUrlId),
       }),
     );
     total.created += result.created;
