@@ -25,7 +25,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (session && isPublicPath) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.redirect(new URL("/today", request.url));
   }
 
   return NextResponse.next();

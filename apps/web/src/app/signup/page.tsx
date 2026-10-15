@@ -40,7 +40,7 @@ export default function SignupPage() {
         setError(body.error ?? "Something went wrong. Please try again.");
         return;
       }
-      router.push("/dashboard");
+      router.push("/today");
       router.refresh();
     } catch {
       setError("Could not reach the server. Please try again.");

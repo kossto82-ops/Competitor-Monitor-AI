@@ -65,6 +65,12 @@ export const updateMonitoredUrlInputSchema = z.object({
 });
 export type UpdateMonitoredUrlInput = z.infer<typeof updateMonitoredUrlInputSchema>;
 
+/** Phase 29 D5: what a person can do with an alert: mark it seen, or dismiss it. OPEN is not settable (an alert only reopens as a new one). */
+export const updateAlertInputSchema = z.object({
+  status: z.enum(["ACKNOWLEDGED", "DISMISSED"]),
+});
+export type UpdateAlertInput = z.infer<typeof updateAlertInputSchema>;
+
 /** Phase 5 (Section 18): email/report preferences. All optional/independently settable - no complex notification rules yet (deferred per Section 18). */
 export const updateOrganizationSettingsInputSchema = z.object({
   timezone: z.string().min(1).max(100).optional(),

@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Building2, GitCompareArrows, FileText, Settings, Sparkles, BarChart3, Bell, Columns3, Newspaper, Activity } from "lucide-react";
+import { CalendarCheck, LayoutDashboard, Building2, GitCompareArrows, FileText, Settings, Sparkles, BarChart3, Bell, Columns3, Newspaper, Activity } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const NAV = [
+  { href: "/today", label: "Today", icon: CalendarCheck },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/digest", label: "Digest", icon: Newspaper },
   { href: "/competitors", label: "Competitors", icon: Building2, section: "Monitoring" },

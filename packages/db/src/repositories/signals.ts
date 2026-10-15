@@ -133,6 +133,32 @@ export async function getSignalWithEvidence(organizationId: string, signalId: st
   });
 }
 
+export interface SignalEvidenceExcerpt {
+  role: "PRIMARY" | "SUPPORTING";
+  changeType: string;
+  oldValue: string | null;
+  newValue: string | null;
+  evidenceExcerpt: string;
+  detectedAt: Date;
+}
+
+/** The change events behind each signal, with the evidence text the detector wrote (tenant-scoped). */
+export async function listSignalEvidenceExcerpts(organizationId: string, signalIds: string[]): Promise<Map<string, SignalEvidenceExcerpt[]>> {
+  const result = new Map<string, SignalEvidenceExcerpt[]>();
+  if (signalIds.length === 0) return result;
+  const rows = await prisma.signalEvidence.findMany({
+    where: { organizationId, signalId: { in: signalIds } },
+    include: { changeEvent: { select: { changeType: true, oldValue: true, newValue: true, evidenceExcerpt: true, detectedAt: true } } },
+    orderBy: { role: "asc" },
+  });
+  for (const row of rows) {
+    const list = result.get(row.signalId) ?? [];
+    list.push({ role: row.role, ...row.changeEvent });
+    result.set(row.signalId, list);
+  }
+  return result;
+}
+
 /**
  * Promotes the signals of every change event the organization already has, oldest first, with the same rules
  * the pipeline uses. Safe to run again: promotion is idempotent.
