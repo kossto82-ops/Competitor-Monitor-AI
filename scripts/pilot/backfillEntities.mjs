@@ -11,7 +11,7 @@ for (const line of readFileSync(join(root, ".env"), "utf8").split(/\r?\n/)) {
   if (m) process.env[m[1]] = m[2].replace(/^"|"$/g, "");
 }
 const db = await import(pathToFileURL(join(root, "packages/db/dist/index.js")).href);
-const owner = await db.prisma.user.findFirst({ where: { email: "pilot@pricing-pilot.example.test" } });
+const owner = await db.prisma.user.findFirst({ where: { email: process.argv[2] ?? "pilot@pricing-pilot.example.test" } });
 if (!owner) throw new Error("The pilot has not been set up (node scripts/pilot/seedPilot.mjs).");
 
 const result = await db.backfillEntityHistory(owner.organizationId, { force: true });

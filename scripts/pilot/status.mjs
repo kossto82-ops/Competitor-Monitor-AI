@@ -12,12 +12,20 @@ for (const line of readFileSync(join(root, ".env"), "utf8").split(/\r?\n/)) {
 const db = await import(pathToFileURL(join(root, "packages/db/dist/index.js")).href);
 const { prisma } = db;
 
-const owner = await prisma.user.findFirst({ where: { email: "pilot@pricing-pilot.example.test" } });
-if (!owner) {
+// Every pilot organization (the original and the ones in scripts/pilot/pilots), or just one: node status.mjs <part of its email>
+const filter = process.argv[2];
+const owners = (await prisma.user.findMany({ where: { email: { endsWith: "@pricing-pilot.example.test" } }, orderBy: { createdAt: "asc" } })).filter((o) => !filter || o.email.includes(filter));
+if (owners.length === 0) {
   console.log("The pilot has not been set up yet: run  node scripts/pilot/seedPilot.mjs");
   process.exit(0);
 }
+for (const owner of owners) await report(owner);
+await prisma.$disconnect();
+
+async function report(owner) {
 const orgId = owner.organizationId;
+const org = await db.getOrganizationById(orgId);
+console.log(`\n=== ${org?.name ?? orgId} (market ${org?.marketLocale ?? "-"}) ===`);
 const ago = (d) => (d ? `${Math.round((Date.now() - d.getTime()) / 60000)} min ago` : "never");
 
 const rows = await db.listSourceHealthForOrg(orgId);
@@ -41,4 +49,4 @@ const byType = {};
 for (const e of events) byType[`${e.changeType}/${e.severity}`] = (byType[`${e.changeType}/${e.severity}`] ?? 0) + 1;
 console.log(`\nTotal: ${totals.ok} scans completed, ${totals.fail} failed, ${totals.events} change events`);
 console.log("Events by type/severity:", Object.keys(byType).length ? JSON.stringify(byType) : "none");
-await prisma.$disconnect();
+}

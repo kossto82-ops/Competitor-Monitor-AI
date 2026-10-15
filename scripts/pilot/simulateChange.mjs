@@ -28,6 +28,12 @@ const PAGES = [
   ["Brevo", "https://www.brevo.com/pricing/"],
   ["Mailchimp", "https://mailchimp.com/pricing/marketing/"],
   ["Zoho CRM", "https://www.zoho.com/crm/zohocrm-pricing.html"],
+  // Spanish and French pilots
+  ["Secretaria.es", "https://www.secretaria.es/servicio-telef%C3%B3nico/precios"],
+  ["SEVIGAL", "https://sevigal.com/tarifas"],
+  ["Bureau24", "https://www.bureau24.fr/service-t%C3%A9l%C3%A9phonique/prix"],
+  ["Permanence24", "https://permanence24.fr/"],
+  ["As2Tel", "https://www.as2tel.fr/tarifs.html"],
 ];
 const wanted = process.argv.slice(2).map((s) => s.toLowerCase());
 const pages = PAGES.filter(([name]) => wanted.length === 0 || wanted.some((w) => name.toLowerCase().includes(w)));
@@ -43,7 +49,7 @@ const num = (v) => Number(String(v).replace(/,/g, ""));
 const numberForms = (value) => {
   const n = Number(value);
   const fixed = n.toFixed(2);
-  return [...new Set([String(n), fixed, n.toLocaleString("en-US"), Number(fixed).toLocaleString("en-US", { minimumFractionDigits: 2 })])];
+  return [...new Set([String(n), fixed, n.toLocaleString("en-US"), Number(fixed).toLocaleString("en-US", { minimumFractionDigits: 2 }), fixed.replace(".", ","), String(n).replace(".", ",")])];
 };
 
 /** `form` as a number of its own: not part of 15,001-20,000, 2026 or 20.5. */
@@ -80,6 +86,14 @@ function* variants(html, value, newValue) {
     yield $.html();
     node.data = original;
   }
+  // a price is often written twice (a desktop and a mobile copy): change every copy at once as well
+  for (const node of nodes.slice(0, 80)) {
+    for (const form of numberForms(value)) {
+      const re = standalone(form);
+      if (re.test(node.data ?? "")) { node.data = node.data.replace(re, (m) => m.replace(form, String(newValue))); break; }
+    }
+  }
+  yield $.html();
 }
 
 /** The first plan price whose change shows up in the extracted data as exactly that one plan changing. */

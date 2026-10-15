@@ -1,6 +1,7 @@
 // Creates (once) the organization the pricing pilot runs on, with the two competitor groups the customer
 // chose, and registers every pricing page for an hourly scan. Idempotent: running it again adds nothing.
-//   node scripts/pilot/seedPilot.mjs
+//   node scripts/pilot/seedPilot.mjs                       the original 8-site pricing pilot
+//   node scripts/pilot/seedPilot.mjs pilots/<file>.json     another pilot (organization, market and sites in the file)
 // A login for the web UI is generated on the first run and written to .local-infra/pilot-credentials.txt
 // (git-ignored); it is never printed.
 import { createRequire } from "node:module";
@@ -18,11 +19,14 @@ const db = await import(pathToFileURL(join(root, "packages/db/dist/index.js")).h
 const requireFromWeb = createRequire(join(root, "apps/web/package.json"));
 const bcrypt = requireFromWeb("bcryptjs");
 
-const ORG_NAME = "Pricing pilot (8 sites)";
-const OWNER_EMAIL = "pilot@pricing-pilot.example.test";
+let ORG_NAME = "Pricing pilot (8 sites)";
+let OWNER_EMAIL = "pilot@pricing-pilot.example.test";
+let MARKET_LOCALE = "en-US";
+let TIMEZONE = "UTC";
+let CREDENTIALS_FILE = "pilot-credentials.txt";
 const SCAN_EVERY_MINUTES = 60;
 
-const GROUPS = {
+let GROUPS = {
   "marketing tools": [
     ["ActiveCampaign", "https://www.activecampaign.com/pricing"],
     ["Klaviyo", "https://www.klaviyo.com/pricing"],
@@ -37,6 +41,17 @@ const GROUPS = {
   ],
 };
 
+// A pilot file replaces the defaults above: { id, organizationName, ownerEmail, marketLocale, timezone, groups }.
+if (process.argv[2]) {
+  const config = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), process.argv[2]), "utf8"));
+  ORG_NAME = config.organizationName;
+  OWNER_EMAIL = config.ownerEmail;
+  MARKET_LOCALE = config.marketLocale;
+  TIMEZONE = config.timezone;
+  GROUPS = config.groups;
+  CREDENTIALS_FILE = `pilot-credentials-${config.id}.txt`;
+}
+
 const { prisma } = db;
 let owner = await prisma.user.findFirst({ where: { email: OWNER_EMAIL } });
 let organization;
@@ -48,12 +63,12 @@ if (owner) {
   const created = await db.createOrganizationWithOwner({ organizationName: ORG_NAME, email: OWNER_EMAIL, passwordHash: await bcrypt.hash(password, 12) });
   organization = created.organization;
   mkdirSync(join(root, ".local-infra"), { recursive: true });
-  writeFileSync(join(root, ".local-infra", "pilot-credentials.txt"), `email: ${OWNER_EMAIL}\npassword: ${password}\n`, { mode: 0o600 });
-  console.log(`pilot organization created (${organization.id}); login saved to .local-infra/pilot-credentials.txt`);
+  writeFileSync(join(root, ".local-infra", CREDENTIALS_FILE), `email: ${OWNER_EMAIL}\npassword: ${password}\n`, { mode: 0o600 });
+  console.log(`pilot organization created (${organization.id}); login saved to .local-infra/${CREDENTIALS_FILE}`);
 }
 
-// Reproducible readings: pages are requested as an English (US) visitor; no email, nothing else to configure.
-await db.updateOrganizationSettings(organization.id, { marketLocale: "en-US", dailyReportEnabled: false, timezone: "UTC" });
+// Reproducible readings: pages are requested as a visitor of the pilot's market; no email, nothing else to configure.
+await db.updateOrganizationSettings(organization.id, { marketLocale: MARKET_LOCALE, dailyReportEnabled: false, timezone: TIMEZONE });
 
 const existingCompetitors = await db.listCompetitorsWithSummaryForOrg(organization.id);
 let added = 0;

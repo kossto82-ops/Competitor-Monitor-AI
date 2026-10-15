@@ -1,0 +1,18 @@
+{
+  "id": "bureau24-fr",
+  "organizationName": "Pilot FR - Bureau24.fr et concurrents",
+  "ownerEmail": "pilot-fr@pricing-pilot.example.test",
+  "marketLocale": "fr-FR",
+  "timezone": "Europe/Paris",
+  "groups": {
+    "reference": [
+      ["Bureau24", "https://www.bureau24.fr/service-t%C3%A9l%C3%A9phonique/prix"]
+    ],
+    "concurrents en France": [
+      ["Permanence24", "https://permanence24.fr/"],
+      ["Permanance", "https://www.permanance.com/permanence-telephonique-tarifs.php"],
+      ["As2Tel", "https://www.as2tel.fr/tarifs.html"],
+      ["Mediphone", "https://mediphone.fr/"]
+    ]
+  }
+}
