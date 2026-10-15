@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ALERT_LEVELS, ALERT_STATUSES, CHANGE_TYPES, ENTITY_TYPES, EPISTEMIC_LEVELS, SIGNAL_KINDS, EXTRACTION_METHODS, JOB_STATUSES, PLANS, REPORT_STATUSES, SEVERITIES, VERIFICATION_STATES } from "@cma/core";
-import { AlertLevel, AlertStatus, ChangeType, EntityType, EpistemicLevel, SignalKind, ExtractionMethod, JobStatus, Plan, ReportStatus, Severity, VerificationState } from "../generated/client/index.js";
+import { MARKET_PATTERN_KINDS, ALERT_LEVELS, ALERT_STATUSES, CHANGE_TYPES, ENTITY_TYPES, EPISTEMIC_LEVELS, SIGNAL_KINDS, EXTRACTION_METHODS, JOB_STATUSES, PLANS, REPORT_STATUSES, SEVERITIES, VERIFICATION_STATES } from "@cma/core";
+import { MarketPatternKind, AlertLevel, AlertStatus, ChangeType, EntityType, EpistemicLevel, SignalKind, ExtractionMethod, JobStatus, Plan, ReportStatus, Severity, VerificationState } from "../generated/client/index.js";
 
 /**
  * Phase 29 C5 (E37): `@cma/core` and the Prisma schema each declare these enums by hand. Nothing tied
@@ -17,6 +17,7 @@ describe("core enums match the Prisma schema", () => {
   it("SignalKind", () => same(SIGNAL_KINDS, SignalKind));
   it("AlertLevel", () => same(ALERT_LEVELS, AlertLevel));
   it("AlertStatus", () => same(ALERT_STATUSES, AlertStatus));
+  it("MarketPatternKind", () => same(MARKET_PATTERN_KINDS, MarketPatternKind));
   it("EpistemicLevel", () => same(EPISTEMIC_LEVELS, EpistemicLevel));
   it("ExtractionMethod", () => same(EXTRACTION_METHODS, ExtractionMethod));
   it("VerificationState", () => same(VERIFICATION_STATES, VerificationState));

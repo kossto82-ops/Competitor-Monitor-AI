@@ -488,6 +488,7 @@ model Signal {
   @@index([monitoredUrlId, occurredAt])
   @@map("signals")
   alertLink AlertSignal?
+  marketPatternEvidence MarketPatternEvidence[]
 }
 
 // Phase 29 D3: the weights behind a signal's importance. Never edited in place: a change is a new version, and
@@ -606,6 +607,63 @@ model AlertDelivery {
   @@unique([alertId, recipient, levelSent, attempt])
   @@index([organizationId, sentAt])
   @@map("alert_deliveries")
+}
+
+// Phase 29 E1: something several competitors did in the same period, derived from their signals. An
+// interpretation (never a fact), claimed only when the sample is large enough, naming every competitor involved
+// and keeping every signal behind it. One ACTIVE row per kind: it is updated while it keeps holding and
+// RESOLVED when it stops, so its history is visible.
+enum MarketPatternKind {
+  MARKET_PRICES_UP
+  MARKET_PRICES_DOWN
+  MARKET_PLANS_ADDED
+  MARKET_PLANS_REMOVED
+  MARKET_PROMOTIONS
+}
+
+enum MarketPatternStatus {
+  ACTIVE
+  RESOLVED
+}
+
+model MarketPattern {
+  id             String              @id @default(cuid())
+  organizationId String
+  kind           MarketPatternKind
+  status         MarketPatternStatus @default(ACTIVE)
+  epistemicLevel EpistemicLevel      @default(INTERPRETATION)
+  ruleVersion    Int
+
+  windowStart   DateTime
+  windowEnd     DateTime
+  affectedCount Int
+  observedCount Int
+  share         Float
+  summary       String
+
+  firstDetectedAt DateTime
+  lastConfirmedAt DateTime
+  resolvedAt      DateTime?
+
+  evidence MarketPatternEvidence[]
+
+  @@index([organizationId, status, lastConfirmedAt])
+  @@map("market_patterns")
+}
+
+model MarketPatternEvidence {
+  id             String        @id @default(cuid())
+  organizationId String
+  patternId      String
+  pattern        MarketPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+  competitorId   String
+  competitorName String
+  signalId       String
+  signal         Signal        @relation(fields: [signalId], references: [id], onDelete: Cascade)
+
+  @@unique([patternId, signalId])
+  @@index([signalId])
+  @@map("market_pattern_evidence")
 }
 
 model SignalEvidence {

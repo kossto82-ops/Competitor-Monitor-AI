@@ -1,4 +1,4 @@
-import type { AlertLevel, ImportanceTier, SignalKind } from "@cma/core";
+import type { AlertLevel, ImportanceTier, MarketPatternKind, SignalKind } from "@cma/core";
 import type { BadgeTone } from "@/components/ui/Badge";
 
 /**
@@ -52,4 +52,16 @@ export function quietDaySummary(sourceCount: number, signalCount: number): strin
   return signalCount === 0
     ? `${sourceCount} page${sourceCount === 1 ? " is" : "s are"} being watched and nothing noteworthy changed.`
     : `${sourceCount} page${sourceCount === 1 ? " is" : "s are"} being watched; the changes below are minor.`;
+}
+
+const PATTERN_LABEL: Record<MarketPatternKind, string> = {
+  MARKET_PRICES_UP: "Prices going up",
+  MARKET_PRICES_DOWN: "Prices going down",
+  MARKET_PLANS_ADDED: "New plans",
+  MARKET_PLANS_REMOVED: "Plans removed",
+  MARKET_PROMOTIONS: "Promotions",
+};
+
+export function patternKindLabel(kind: string): string {
+  return PATTERN_LABEL[kind as MarketPatternKind] ?? kind;
 }

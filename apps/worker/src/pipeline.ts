@@ -114,6 +114,8 @@ export function createDefaultPipelineDeps(): PipelineDeps {
     persistNotModifiedResult: db.persistNotModifiedResult,
     raiseAlerts: async (organizationId) => {
       await db.raiseAlerts(organizationId);
+      // Phase 29 E1: market patterns follow the signals. A failure here must not hold back the alert emails.
+      await db.refreshMarketPatterns(organizationId).catch((error) => console.error("[pipeline] refreshing market patterns failed:", error instanceof Error ? error.message : error));
       await deliverAlertEmails(organizationId); // never throws: a mail problem cannot fail a scan
     },
   };

@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { CalendarCheck, CheckCircle2 } from "lucide-react";
-import { listAlerts, listPrioritizedSignals, listSignalEvidenceExcerpts, listSourceHealthForOrg } from "@cma/db";
+import { getMarketPatternOverview, listAlerts, listPrioritizedSignals, listSignalEvidenceExcerpts, listSourceHealthForOrg } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { AlertActions } from "@/components/app/AlertActions";
 import { SourceHealthStateBadge } from "@/components/app/SourceHealthBadge";
-import { ALERT_LEVEL_DISPLAY, confidenceLabel, pointsBarPercent, quietDaySummary, signalKindLabel, TIER_DISPLAY } from "@/lib/alertDisplay";
+import { ALERT_LEVEL_DISPLAY, confidenceLabel, patternKindLabel, pointsBarPercent, quietDaySummary, signalKindLabel, TIER_DISPLAY } from "@/lib/alertDisplay";
 import { formatRelativeTime } from "@/lib/formatTime";
 
 // Phase 29 D5: "what should I know today", ordered by importance instead of by recency or by count.
@@ -21,10 +21,11 @@ export default async function TodayPage() {
   const orgId = session.organizationId;
 
   const since = new Date(Date.now() - SIGNAL_WINDOW_DAYS * 24 * 60 * 60_000);
-  const [alerts, prioritized, sources] = await Promise.all([
+  const [alerts, prioritized, sources, market] = await Promise.all([
     listAlerts(orgId, { limit: 50 }),
     listPrioritizedSignals(orgId, { since, limit: 200 }),
     listSourceHealthForOrg(orgId),
+    getMarketPatternOverview(orgId),
   ]);
   const open = alerts.filter((a) => a.status === "OPEN" || a.status === "ACKNOWLEDGED");
   const signals = prioritized.signals.slice(0, SIGNALS_SHOWN);
@@ -156,6 +157,61 @@ export default async function TodayPage() {
               })}
             </ul>
           )}
+        </Card>
+      </section>
+
+      <section aria-labelledby="market-heading">
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <span id="market-heading">Across your competitors</span>
+            </CardTitle>
+          </CardHeader>
+          {!market.sample.sufficient ? (
+            <CardContent className="space-y-1">
+              <p className="text-sm text-slate-700">Not enough history yet to say anything about the market as a whole.</p>
+              <p className="text-xs text-slate-500">{market.sample.reason}</p>
+              <p className="text-xs text-slate-400">A pattern is only reported when several competitors did the same thing, so it needs several competitors observed long enough. Until then, the signals above are all there is to know.</p>
+            </CardContent>
+          ) : market.active.length === 0 ? (
+            <CardContent className="space-y-1">
+              <p className="text-sm text-slate-700">No pattern right now: no kind of change is shared by enough of your {market.sample.eligibleCount} competitors.</p>
+              <p className="text-xs text-slate-400">That is a result, not a gap: it takes at least two competitors and 40% of those observed doing the same thing in 30 days.</p>
+            </CardContent>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {market.active.map((pattern) => (
+                <li key={pattern.id} className="space-y-2 px-5 py-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="purple">{patternKindLabel(pattern.kind)}</Badge>
+                    <span className="text-sm font-medium text-slate-900">
+                      {pattern.affectedCount} of {pattern.observedCount} competitors
+                    </span>
+                    <span className="text-xs text-slate-400">interpretation, not a fact · since {formatRelativeTime(pattern.firstDetectedAt)}</span>
+                  </div>
+                  <p className="text-sm text-slate-700">{pattern.summary}</p>
+                  <details>
+                    <summary className="cursor-pointer text-xs font-medium text-indigo-700 hover:text-indigo-900">Who, and the changes behind it</summary>
+                    <ul className="mt-2 space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+                      {pattern.competitors.map((c) => (
+                        <li key={c.competitorId}>
+                          <Link href={`/competitors/${c.competitorId}`} className="font-medium text-slate-800 hover:text-indigo-700">
+                            {c.name}
+                          </Link>{" "}
+                          · {c.signalIds.length} observed change{c.signalIds.length === 1 ? "" : "s"}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          )}
+          {market.recentlyResolved.length > 0 ? (
+            <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+              Recently ended: {market.recentlyResolved.map((p) => `${patternKindLabel(p.kind)} (${p.affectedCount} of ${p.observedCount})`).join(", ")}
+            </div>
+          ) : null}
         </Card>
       </section>
 

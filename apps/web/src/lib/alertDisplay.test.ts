@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ALERT_LEVELS, SIGNAL_KINDS } from "@cma/core";
-import { ALERT_LEVEL_DISPLAY, confidenceLabel, pointsBarPercent, quietDaySummary, signalKindLabel, TIER_DISPLAY } from "./alertDisplay";
+import { ALERT_LEVELS, MARKET_PATTERN_KINDS, SIGNAL_KINDS } from "@cma/core";
+import { ALERT_LEVEL_DISPLAY, confidenceLabel, patternKindLabel, pointsBarPercent, quietDaySummary, signalKindLabel, TIER_DISPLAY } from "./alertDisplay";
 
 describe("alert and signal display (Phase 29 D5)", () => {
   it("has a label, a colour and a meaning for every alert level and tier", () => {
@@ -36,5 +36,10 @@ describe("alert and signal display (Phase 29 D5)", () => {
     expect(quietDaySummary(1, 0)).toBe("1 page is being watched and nothing noteworthy changed.");
     expect(quietDaySummary(10, 0)).toBe("10 pages are being watched and nothing noteworthy changed.");
     expect(quietDaySummary(10, 3)).toContain("changes below are minor");
+  });
+
+  it("names every kind of market pattern in words", () => {
+    for (const kind of MARKET_PATTERN_KINDS) expect(patternKindLabel(kind)).not.toBe(kind);
+    expect(patternKindLabel("SOMETHING_NEW")).toBe("SOMETHING_NEW");
   });
 });

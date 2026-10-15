@@ -25,3 +25,4 @@ export * from "./repositories/importance.js";
 export * from "./repositories/alerts.js";
 export * from "./repositories/alertDelivery.js";
 export * from "./repositories/userSessions.js";
+export * from "./repositories/marketPatterns.js";

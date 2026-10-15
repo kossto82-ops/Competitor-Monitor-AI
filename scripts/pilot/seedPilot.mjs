@@ -1,5 +1,5 @@
 // Creates (once) the organization the pricing pilot runs on, with the two competitor groups the customer
-// chose, and registers every pricing page for an hourly scan. Idempotent: running it again adds nothing.
+// chose, and registers every pricing page for a daily scan. Idempotent: running it again adds nothing.
 //   node scripts/pilot/seedPilot.mjs                       the original 8-site pricing pilot
 //   node scripts/pilot/seedPilot.mjs pilots/<file>.json     another pilot (organization, market and sites in the file)
 // A login for the web UI is generated on the first run and written to .local-infra/pilot-credentials.txt
@@ -24,7 +24,7 @@ let OWNER_EMAIL = "pilot@pricing-pilot.example.test";
 let MARKET_LOCALE = "en-US";
 let TIMEZONE = "UTC";
 let CREDENTIALS_FILE = "pilot-credentials.txt";
-const SCAN_EVERY_MINUTES = 60;
+const SCAN_EVERY_MINUTES = 1440; // once a day: enough to see a competitor change, and kind to their servers
 
 let GROUPS = {
   "marketing tools": [
