@@ -113,6 +113,54 @@ describe("runMonitoringJob", () => {
     expect(persistedCall?.comparison.changeEvents[0]?.changeType).toBe("PRICE_CHANGE");
   });
 
+  describe("alerts after a scan (Phase 29 D4)", () => {
+    const withPriceChange = (overrides: Partial<PipelineDeps> = {}) =>
+      makeDeps({
+        getLatestVerifiedSnapshot: vi.fn().mockResolvedValue({
+          id: "snap-prior",
+          contentHash: "hash-old",
+          structuredDataHash: "struct-old",
+          normalizedContent: "Pro Plan 49 EUR",
+          extractedEntities: [{ type: "PRICE", key: "jsonld:pro plan", label: "Pro Plan", value: "49.00", currency: "EUR", raw: "{}" }],
+        }),
+        extractor: {
+          extract: vi.fn().mockResolvedValue(
+            extractionResult({ extractedEntities: [{ type: "PRICE", key: "jsonld:pro plan", label: "Pro Plan", value: "39.00", currency: "EUR", raw: "{}" }] }),
+          ),
+        },
+        ...overrides,
+      });
+
+    it("evaluates the alert rules for the organization after a scan that found changes, once the scan is recorded", async () => {
+      const order: string[] = [];
+      const raiseAlerts = vi.fn().mockImplementation(async () => void order.push("alerts"));
+      const deps = withPriceChange({
+        raiseAlerts,
+        persistMonitoringResult: vi.fn().mockImplementation(async () => void order.push("persist")),
+      });
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+      expect(raiseAlerts).toHaveBeenCalledWith("org-1");
+      expect(order).toEqual(["persist", "alerts"]);
+    });
+
+    it("does not evaluate alerts for a scan with no changes", async () => {
+      const raiseAlerts = vi.fn().mockResolvedValue(undefined);
+      await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, makeDeps({ raiseAlerts }));
+      expect(raiseAlerts).not.toHaveBeenCalled();
+    });
+
+    it("never fails or retries a scan because raising alerts failed: the scan is already recorded", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const raiseAlerts = vi.fn().mockRejectedValue(new Error("alerts table unavailable"));
+      const deps = withPriceChange({ raiseAlerts });
+      const result = await runMonitoringJob({ organizationId: "org-1", monitoredUrlId: "url-1" }, deps);
+      expect(result.verificationState).toBe("CHANGED");
+      expect(deps.markMonitoringJobFailed).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("raising alerts failed"), "alerts table unavailable");
+      error.mockRestore();
+    });
+  });
+
   it("never invents a change when extraction fails - persists FAILED_TO_VERIFY with zero change events", async () => {
     const deps = makeDeps({
       getLatestVerifiedSnapshot: vi.fn().mockResolvedValue({

@@ -254,6 +254,7 @@ model MonitoredUrl {
 
   entities Entity[]
   signals  Signal[]
+  alerts   AlertEvent[]
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +462,7 @@ model Signal {
   @@index([organizationId, occurredAt])
   @@index([monitoredUrlId, occurredAt])
   @@map("signals")
+  alertLink AlertSignal?
 }
 
 // Phase 29 D3: the weights behind a signal's importance. Never edited in place: a change is a new version, and
@@ -477,6 +479,81 @@ model ImportanceConfig {
 
   @@unique([organizationId, version])
   @@map("importance_configs")
+}
+
+// Phase 29 D4: a signal important enough to tell someone about. Rules are observable (kinds, minimum
+// importance, minimum confidence); every alert stores the explanation of which rule matched and why, and
+// repeats of the same page, plan and kind within a day join the open alert instead of raising a new one.
+enum AlertLevel {
+  URGENT
+  IMPORTANT
+  NOTICE
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  DISMISSED
+}
+
+model AlertRule {
+  id             String     @id @default(cuid())
+  organizationId String
+  ruleKey        String
+  name           String
+  level          AlertLevel
+  minImportance  Int
+  minConfidence  Float
+  kinds          Json
+  enabled        Boolean    @default(true)
+  position       Int        @default(0)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([organizationId, ruleKey])
+  @@map("alert_rules")
+}
+
+model AlertEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  competitorId   String
+  monitoredUrlId String
+  monitoredUrl   MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+
+  ruleKey     String
+  ruleName    String
+  level       AlertLevel
+  status      AlertStatus @default(OPEN)
+  title       String
+  // Never empty: the rule that matched, with its numbers, and the signal's strongest reasons.
+  explanation String
+  importance  Int
+  confidence  Float
+
+  dedupeKey       String
+  occurrences     Int       @default(1)
+  firstRaisedAt   DateTime
+  lastRaisedAt    DateTime
+  statusChangedAt DateTime?
+
+  signals AlertSignal[]
+
+  @@index([organizationId, status, lastRaisedAt])
+  @@index([organizationId, dedupeKey, lastRaisedAt])
+  @@map("alert_events")
+}
+
+model AlertSignal {
+  id             String     @id @default(cuid())
+  organizationId String
+  alertId        String
+  alert          AlertEvent @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  signalId       String     @unique
+  signal         Signal     @relation(fields: [signalId], references: [id], onDelete: Cascade)
+
+  @@index([alertId])
+  @@map("alert_signals")
 }
 
 model SignalEvidence {

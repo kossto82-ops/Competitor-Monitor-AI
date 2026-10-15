@@ -65,6 +65,8 @@ interface PriorSnapshotLike {
  * @cma/extraction implementations.
  */
 export interface PipelineDeps {
+  /** Phase 29 D4: evaluates the alert rules over the organization's recent signals. Optional, and its failure never fails a scan. */
+  raiseAlerts?: (organizationId: string) => Promise<unknown>;
   /** The organization's market setting (Accept-Language locale), or null when none is set. */
   getOrganizationMarketLocale: (organizationId: string) => Promise<string | null>;
   /** Changes recorded for this URL recently, to recognise a value that flips back (Phase 29 C4). */
@@ -109,6 +111,7 @@ export function createDefaultPipelineDeps(): PipelineDeps {
     getOrganizationMarketLocale: async (organizationId) => (await db.getOrganizationById(organizationId))?.marketLocale ?? null,
     listRecentChangeEventsForUrl: (organizationId, monitoredUrlId, sinceMs) => db.listRecentChangeEventsForUrl(organizationId, monitoredUrlId, sinceMs),
     persistNotModifiedResult: db.persistNotModifiedResult,
+    raiseAlerts: (organizationId) => db.raiseAlerts(organizationId),
   };
 }
 
@@ -233,6 +236,12 @@ export async function runMonitoringJob(
       // Phase 1 never escalates to a browser or calls the AI layer.
       usage: { browserEscalated: false, aiCallMade: false },
     });
+
+    // Alerts come from signals, and signals only from verified events: nothing to evaluate otherwise. A failure
+    // here is logged and ignored, because the scan itself has already been recorded.
+    if (deps.raiseAlerts && comparison.changeEvents.length > 0) {
+      await deps.raiseAlerts(monitoredUrl.organizationId).catch((error) => console.error("[pipeline] raising alerts failed:", error instanceof Error ? error.message : error));
+    }
 
     return {
       monitoringJobId: job.id,

@@ -11,3 +11,4 @@ export * from "./market.js";
 export * from "./entityHistory.js";
 export * from "./signalRules.js";
 export * from "./importance.js";
+export * from "./alertRules.js";

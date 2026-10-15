@@ -140,6 +140,8 @@ try {
       const s1 = await scan(page.body);
       const s2 = await scan(changed.html);
       const s3 = await scan(page.body);
+      await db.raiseAlerts(organization.id);
+      const alert = (await db.listAlerts(organization.id)).find((a) => a.monitoredUrlId === monitored.id);
       const events = await prisma.changeEvent.findMany({ where: { monitoredUrlId: monitored.id }, orderBy: { detectedAt: "asc" } });
       const price = events.filter((e) => e.changeType === "PRICE_CHANGE");
       const other = events.filter((e) => e.changeType !== "PRICE_CHANGE").map((e) => e.changeType);
@@ -148,7 +150,8 @@ try {
       row.outcome = up && back ? "DETECTED" : "MISSED";
       row.detail = `${changed.key}: ${changed.from} -> ${changed.to}; states ${s1.verificationState}/${s2.verificationState}/${s3.verificationState}; ` +
         `up=${up ? `${up.oldValue}->${up.newValue} ${up.percentageChange}% ${up.severity}` : "none"}; back=${back ? "yes" : "none"}; ` +
-        `other events: ${other.length ? other.join(",") : "none"}`;
+        `other events: ${other.length ? other.join(",") : "none"}; alert=${alert ? `${alert.level} (importance ${alert.importance}, x${alert.occurrences})` : "none"}`;
+      if (alert && process.env.SIM_EXPLAIN) console.log(`\n--- ${name}: ${alert.title}\n${alert.explanation}\n`);
     } catch (error) {
       row.outcome = "ERROR";
       row.detail = String(error?.message ?? error).slice(0, 200);
