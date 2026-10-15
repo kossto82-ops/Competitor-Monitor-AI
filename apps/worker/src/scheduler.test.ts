@@ -155,6 +155,30 @@ describe("startScheduler", () => {
     errors.mockRestore();
   });
 
+  it("sends held-back alert emails on each monitoring tick, and keeps monitoring if that fails", async () => {
+    const deliver = vi.fn().mockResolvedValue({ organizations: 2, sent: 1 });
+    const monitoring = makeMonitoringDeps([{ id: "url-1", organizationId: "org-1" }]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const { deps } = makeSchedulerDeps({ monitoring, deliverPendingAlertEmails: deliver });
+    const handle = startScheduler(deps);
+    await flush();
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("alert emails sent for 1/2"));
+    handle.stop();
+
+    const failing = vi.fn().mockRejectedValue(new Error("smtp down"));
+    const second = makeMonitoringDeps([{ id: "url-2", organizationId: "org-1" }]);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { deps: deps2 } = makeSchedulerDeps({ monitoring: second, deliverPendingAlertEmails: failing });
+    const handle2 = startScheduler(deps2);
+    await flush();
+    expect(second.listDueMonitoredUrls).toHaveBeenCalled();
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining("alert email pass failed"), expect.any(Error));
+    handle2.stop();
+    log.mockRestore();
+    errors.mockRestore();
+  });
+
   it("stops unreachable sources before enqueueing, and keeps monitoring if that pass fails", async () => {
     const disable = vi.fn().mockResolvedValue([{ id: "url-9", url: "https://dead.test" }]);
     const monitoring = makeMonitoringDeps([{ id: "url-1", organizationId: "org-1" }]);

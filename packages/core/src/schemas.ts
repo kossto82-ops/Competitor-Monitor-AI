@@ -75,6 +75,9 @@ export type UpdateAlertInput = z.infer<typeof updateAlertInputSchema>;
 export const updateOrganizationSettingsInputSchema = z.object({
   timezone: z.string().min(1).max(100).optional(),
   dailyReportEnabled: z.boolean().optional(),
+  /** Phase 29 D5b: email alerts as they are raised, from this level up. */
+  alertEmailsEnabled: z.boolean().optional(),
+  alertEmailMinLevel: z.enum(["URGENT", "IMPORTANT", "NOTICE"]).optional(),
   /** Empty string clears the override, reverting to the OWNER's email. */
   reportRecipientEmail: z.union([z.string().email(), z.literal("")]).optional(),
   /** The market competitors' pages are read in (see market.ts). Empty string clears it: the sites' own default. */

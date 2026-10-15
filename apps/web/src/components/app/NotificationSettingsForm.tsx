@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 
 export interface NotificationSettingsData {
   dailyReportEnabled: boolean;
+  alertEmailsEnabled: boolean;
+  alertEmailMinLevel: "URGENT" | "IMPORTANT" | "NOTICE";
   reportRecipientEmail: string | null;
   ownerEmail: string | null;
   timezone: string;
@@ -30,6 +32,8 @@ const COMMON_TIMEZONES = [
 export function NotificationSettingsForm({ initial }: { initial: NotificationSettingsData }) {
   const router = useRouter();
   const [enabled, setEnabled] = useState(initial.dailyReportEnabled);
+  const [alertsEnabled, setAlertsEnabled] = useState(initial.alertEmailsEnabled);
+  const [alertLevel, setAlertLevel] = useState(initial.alertEmailMinLevel);
   const [recipient, setRecipient] = useState(initial.reportRecipientEmail ?? "");
   const [timezone, setTimezone] = useState(initial.timezone);
   const [saving, setSaving] = useState(false);
@@ -45,7 +49,7 @@ export function NotificationSettingsForm({ initial }: { initial: NotificationSet
       const response = await fetch("/api/settings/organization", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dailyReportEnabled: enabled, reportRecipientEmail: recipient, timezone }),
+        body: JSON.stringify({ dailyReportEnabled: enabled, alertEmailsEnabled: alertsEnabled, alertEmailMinLevel: alertLevel, reportRecipientEmail: recipient, timezone }),
       });
       const body = await response.json();
       if (!response.ok) {
@@ -64,7 +68,7 @@ export function NotificationSettingsForm({ initial }: { initial: NotificationSet
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Daily report email</CardTitle>
+        <CardTitle>Emails</CardTitle>
       </CardHeader>
       <CardContent>
         <form className="space-y-4" onSubmit={onSubmit}>
@@ -72,6 +76,30 @@ export function NotificationSettingsForm({ initial }: { initial: NotificationSet
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
             Send me a daily competitor update email
           </label>
+
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={alertsEnabled} onChange={(e) => setAlertsEnabled(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+              Email me when something important happens
+            </label>
+            <div className={alertsEnabled ? "" : "opacity-50"}>
+              <Label htmlFor="alert-level">Email alerts from this level up</Label>
+              <select
+                id="alert-level"
+                value={alertLevel}
+                disabled={!alertsEnabled}
+                onChange={(e) => setAlertLevel(e.target.value as typeof alertLevel)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed"
+              >
+                <option value="URGENT">Urgent only</option>
+                <option value="IMPORTANT">Important and urgent</option>
+                <option value="NOTICE">Everything, including notices</option>
+              </select>
+              <p className="mt-1 text-xs text-slate-400">
+                Several alerts that are ready together share one email, with the reason for each. Alerts always appear on the Today page, whatever you choose here.
+              </p>
+            </div>
+          </div>
 
           <div>
             <Label htmlFor="recipient">Recipient</Label>

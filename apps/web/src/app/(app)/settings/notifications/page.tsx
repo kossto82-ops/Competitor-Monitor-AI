@@ -23,12 +23,14 @@ export default async function NotificationSettingsPage() {
     <div className="max-w-xl space-y-6">
       <div>
         <h1 className="text-lg font-semibold text-slate-900">Notifications</h1>
-        <p className="text-sm text-slate-500">Control who receives your daily competitor report, and in which timezone it's generated.</p>
+        <p className="text-sm text-slate-500">Control who receives your daily competitor report and your alert emails, and in which timezone the report is generated.</p>
       </div>
 
       <NotificationSettingsForm
         initial={{
           dailyReportEnabled: organization.dailyReportEnabled,
+          alertEmailsEnabled: organization.alertEmailsEnabled,
+          alertEmailMinLevel: organization.alertEmailMinLevel,
           reportRecipientEmail: organization.reportRecipientEmail,
           ownerEmail,
           timezone: organization.timezone,

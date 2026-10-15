@@ -23,3 +23,4 @@ export * from "./repositories/entityHistory.js";
 export * from "./repositories/signals.js";
 export * from "./repositories/importance.js";
 export * from "./repositories/alerts.js";
+export * from "./repositories/alertDelivery.js";

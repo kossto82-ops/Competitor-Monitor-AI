@@ -169,6 +169,10 @@ model Organization {
   digestAiInterpretations DigestAiInterpretation[]
 
   @@map("organizations")
+
+  // Phase 29 D5b: email an alert when it reaches this level (never below it); the Today page shows all of them.
+  alertEmailsEnabled Boolean    @default(true)
+  alertEmailMinLevel AlertLevel @default(IMPORTANT)
 }
 
 model User {
@@ -542,6 +546,7 @@ model AlertEvent {
   @@index([organizationId, status, lastRaisedAt])
   @@index([organizationId, dedupeKey, lastRaisedAt])
   @@map("alert_events")
+  deliveries AlertDelivery[]
 }
 
 model AlertSignal {
@@ -554,6 +559,32 @@ model AlertSignal {
 
   @@index([alertId])
   @@map("alert_signals")
+}
+
+// Phase 29 D5b: an alert emailed to a recipient. One row per attempt, so a failure is kept and counted; the
+// unique key on (alert, recipient, level, attempt) is what stops two runs from sending the same email.
+enum AlertDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model AlertDelivery {
+  id             String     @id @default(cuid())
+  organizationId String
+  alertId        String
+  alert          AlertEvent @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  recipient      String
+  levelSent      AlertLevel
+  attempt        Int
+  status         AlertDeliveryStatus @default(PENDING)
+  errorMessage   String?
+  createdAt      DateTime   @default(now())
+  sentAt         DateTime?
+
+  @@unique([alertId, recipient, levelSent, attempt])
+  @@index([organizationId, sentAt])
+  @@map("alert_deliveries")
 }
 
 model SignalEvidence {

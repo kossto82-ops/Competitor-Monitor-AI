@@ -51,6 +51,8 @@ export async function updateOrganizationSettings(organizationId: string, input: 
     data: {
       ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
       ...(input.dailyReportEnabled !== undefined ? { dailyReportEnabled: input.dailyReportEnabled } : {}),
+      ...(input.alertEmailsEnabled !== undefined ? { alertEmailsEnabled: input.alertEmailsEnabled } : {}),
+      ...(input.alertEmailMinLevel !== undefined ? { alertEmailMinLevel: input.alertEmailMinLevel } : {}),
       ...(input.reportRecipientEmail !== undefined ? { reportRecipientEmail: input.reportRecipientEmail || null } : {}),
       // Empty string clears the market: the sites' own default is used again.
       ...(input.marketLocale !== undefined ? { marketLocale: input.marketLocale || null } : {}),

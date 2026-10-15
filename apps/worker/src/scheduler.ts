@@ -1,5 +1,6 @@
-import { disableUnreachableSources, listDueMonitoredUrls, listOrganizationsForDailyReportScheduling, sweepStuckJobs, type AutoDisableOptions, type SweepResult } from "@cma/db";
+import { disableUnreachableSources, listDueMonitoredUrls, listOrganizationIdsWithOpenAlerts, listOrganizationsForDailyReportScheduling, sweepStuckJobs, type AutoDisableOptions, type SweepResult } from "@cma/db";
 import { createMonitoringQueue, createDailyReportQueue, createRedisConnection } from "@cma/queue";
+import { deliverAlertEmails } from "./alertDelivery.js";
 import { enqueueDueMonitoringJobs, type EnqueueAllDeps } from "./enqueueAll.js";
 import { enqueueDailyReportJobs, type EnqueueDailyReportsDeps } from "./enqueueDailyReports.js";
 import { pathToFileURL } from "node:url";
@@ -73,6 +74,8 @@ export interface SchedulerDeps {
   disableUnreachableSources?: () => Promise<{ id: string; url: string }[]>;
   /** Phase 29 B4: fails jobs whose worker died (stuck RUNNING/PENDING rows). Same isolation as above. */
   sweepStuckJobs?: () => Promise<SweepResult>;
+  /** Phase 29 D5b: sends alert emails that were held back (gap between emails). Same isolation as above. */
+  deliverPendingAlertEmails?: () => Promise<{ organizations: number; sent: number }>;
   /** Injectable so tests can drive ticks deterministically without waiting on real timers. */
   setInterval: typeof setInterval;
   clearInterval: typeof clearInterval;
@@ -101,6 +104,12 @@ export function createDefaultSchedulerDeps(): { deps: SchedulerDeps; close: () =
     },
     disableUnreachableSources: () => disableUnreachableSources(new Date(), readAutoDisableOptions()),
     sweepStuckJobs: () => sweepStuckJobs(new Date()),
+    deliverPendingAlertEmails: async () => {
+      const organizationIds = await listOrganizationIdsWithOpenAlerts();
+      let sent = 0;
+      for (const organizationId of organizationIds) if ((await deliverAlertEmails(organizationId)) === "SENT") sent += 1;
+      return { organizations: organizationIds.length, sent };
+    },
     monitoringIntervalMs: readIntervalMs("CMA_SCHEDULER_MONITORING_INTERVAL_MS", DEFAULT_MONITORING_INTERVAL_MS),
     dailyReportIntervalMs: readIntervalMs("CMA_SCHEDULER_DAILY_REPORT_INTERVAL_MS", DEFAULT_DAILY_REPORT_INTERVAL_MS),
     setInterval,
@@ -183,6 +192,14 @@ export function startScheduler(deps: SchedulerDeps): SchedulerHandle {
         }
       } catch (err) {
         console.error("[scheduler] auto-disable pass failed (monitoring continues):", err);
+      }
+    }
+    if (deps.deliverPendingAlertEmails) {
+      try {
+        const delivered = await deps.deliverPendingAlertEmails();
+        if (delivered.sent > 0) console.log(`[scheduler] alert emails sent for ${delivered.sent}/${delivered.organizations} organization(s) with open alerts`);
+      } catch (err) {
+        console.error("[scheduler] alert email pass failed (monitoring continues):", err);
       }
     }
     const result = await enqueueDueMonitoringJobs(deps.monitoring);

@@ -3,6 +3,7 @@ import { CheerioExtractor, createRobotsCheckerFromEnv, defaultFetch, EXTRACTOR_V
 import { compareSnapshots, type PriorSnapshotData, type RecentChangeEvent } from "@cma/detection";
 import * as db from "@cma/db";
 import type { MonitoringJobPayload } from "@cma/queue";
+import { deliverAlertEmails } from "./alertDelivery.js";
 
 function toCoreEntities(
   rows: { type: string; key: string; label: string; value: string | null; currency: string | null; raw: string }[],
@@ -111,7 +112,10 @@ export function createDefaultPipelineDeps(): PipelineDeps {
     getOrganizationMarketLocale: async (organizationId) => (await db.getOrganizationById(organizationId))?.marketLocale ?? null,
     listRecentChangeEventsForUrl: (organizationId, monitoredUrlId, sinceMs) => db.listRecentChangeEventsForUrl(organizationId, monitoredUrlId, sinceMs),
     persistNotModifiedResult: db.persistNotModifiedResult,
-    raiseAlerts: (organizationId) => db.raiseAlerts(organizationId),
+    raiseAlerts: async (organizationId) => {
+      await db.raiseAlerts(organizationId);
+      await deliverAlertEmails(organizationId); // never throws: a mail problem cannot fail a scan
+    },
   };
 }
 
