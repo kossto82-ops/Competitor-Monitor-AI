@@ -205,6 +205,9 @@ model Competitor {
 
   @@index([organizationId])
   @@map("competitors")
+
+  // Phase 29 D3: how much the customer cares about this competitor, 1 low / 2 normal / 3 high.
+  relevance Int @default(2)
 }
 
 model MonitoredUrl {
@@ -458,6 +461,22 @@ model Signal {
   @@index([organizationId, occurredAt])
   @@index([monitoredUrlId, occurredAt])
   @@map("signals")
+}
+
+// Phase 29 D3: the weights behind a signal's importance. Never edited in place: a change is a new version, and
+// every importance breakdown says which version produced it. No row means the built-in default.
+model ImportanceConfig {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  version             Int
+  weights             Json
+  kindEmphasis        Json
+  tiers               Json
+  recencyHalfLifeDays Float
+  createdAt           DateTime @default(now())
+
+  @@unique([organizationId, version])
+  @@map("importance_configs")
 }
 
 model SignalEvidence {

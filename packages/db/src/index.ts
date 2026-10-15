@@ -21,3 +21,4 @@ export * from "./repositories/patterns.js";
 export * from "./repositories/sourceHealth.js";
 export * from "./repositories/entityHistory.js";
 export * from "./repositories/signals.js";
+export * from "./repositories/importance.js";

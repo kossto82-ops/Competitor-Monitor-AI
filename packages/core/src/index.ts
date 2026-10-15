@@ -10,3 +10,4 @@ export * from "./money.js";
 export * from "./market.js";
 export * from "./entityHistory.js";
 export * from "./signalRules.js";
+export * from "./importance.js";
