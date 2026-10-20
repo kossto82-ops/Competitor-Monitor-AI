@@ -98,7 +98,7 @@ describe.skipIf(!reachable)("capability observations (Phase 29 F1)", () => {
         monitoredUrlId: ids.url.id,
         previousSnapshotId: null,
         extraction: { method: "CHEERIO", requestedUrl: "https://x.test/", finalUrl: "https://x.test/", httpStatus: 200, errorMessage, normalizedContent: text, contentHash: "h", structuredDataHash: null, extractedEntities: [], confidence: 1, warnings: [], durationMs: 1 } as ExtractionResult,
-        comparison: { verificationState: state, changeEvents: [] } as ComparisonResult,
+        comparison: { verificationState: state, changeEvents: [] } as unknown as ComparisonResult,
         usage,
       });
     };
