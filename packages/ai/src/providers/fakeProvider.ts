@@ -1,3 +1,4 @@
+import type { CapabilityClassificationInput } from "../capabilityClassification.js";
 import type { AiProvider, ChangeAnalysisInput, EvidenceBundleInput, NormalizedAiResponse } from "../types.js";
 
 /**
@@ -31,6 +32,9 @@ export interface FakeAiProviderOptions {
   respondDigest?: (input: EvidenceBundleInput) => string | Promise<string>;
   throwErrorDigest?: () => Error;
   failFirstNDigestCalls?: number;
+  /** Phase 29 F3: the raw text returned for a capability classification. Default: a finding for every candidate whose label appears in the page. */
+  respondCapabilities?: (input: CapabilityClassificationInput) => string | Promise<string>;
+  throwErrorCapabilities?: () => Error;
 }
 
 function defaultCannedResponse(input: ChangeAnalysisInput): string {
@@ -87,11 +91,23 @@ function defaultCannedDigestResponse(input: EvidenceBundleInput): string {
   });
 }
 
+/** Quotes the sentence around a capability's label when the page contains it; nothing otherwise. */
+function defaultCannedCapabilityResponse(input: CapabilityClassificationInput): string {
+  const findings: { key: string; quote: string; confidence: string }[] = [];
+  for (const candidate of input.candidates) {
+    const at = input.pageText.toLowerCase().indexOf(candidate.label.toLowerCase());
+    if (at === -1) continue;
+    findings.push({ key: candidate.key, quote: input.pageText.slice(at, at + Math.max(candidate.label.length, 20)), confidence: "medium" });
+  }
+  return JSON.stringify({ findings });
+}
+
 export function createFakeAiProvider(
   options: FakeAiProviderOptions = {},
-): AiProvider & { callCount: number; digestCallCount: number } {
+): AiProvider & { callCount: number; digestCallCount: number; capabilityCallCount: number } {
   let callCount = 0;
   let digestCallCount = 0;
+  let capabilityCallCount = 0;
 
   return {
     name: "fake",
@@ -100,6 +116,15 @@ export function createFakeAiProvider(
     },
     get digestCallCount() {
       return digestCallCount;
+    },
+    get capabilityCallCount() {
+      return capabilityCallCount;
+    },
+    async classifyCapabilities(input: CapabilityClassificationInput): Promise<NormalizedAiResponse> {
+      capabilityCallCount += 1;
+      if (options.throwErrorCapabilities) throw options.throwErrorCapabilities();
+      const content = options.respondCapabilities ? await options.respondCapabilities(input) : defaultCannedCapabilityResponse(input);
+      return { content, inputTokens: 300, outputTokens: 60, totalTokens: 360, finishReason: "stop" };
     },
     async analyzeChange(input: ChangeAnalysisInput): Promise<NormalizedAiResponse> {
       callCount += 1;

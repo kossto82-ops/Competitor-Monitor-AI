@@ -3,6 +3,8 @@ import {
   createAiAnalysisWorker,
   createDailyReportWorker,
   createDigestInterpretationWorker,
+  createCapabilityAiWorker,
+  type CapabilityAiJobPayload,
   type MonitoringJobPayload,
   type AiAnalysisJobPayload,
   type DailyReportJobPayload,
@@ -16,6 +18,8 @@ import {
   markReportFailed,
   getOrCreateReportPeriod,
   getDigestAiInterpretationForOrgOrThrow,
+  getCapabilityAiRunForOrgOrThrow,
+  markCapabilityAiRunFailed,
   markDigestAiInterpretationFailed,
 } from "@cma/db";
 import { assertStartupConfig } from "@cma/security";
@@ -24,6 +28,7 @@ import { runMonitoringJob } from "./pipeline.js";
 import { runAiAnalysisJob } from "./aiPipeline.js";
 import { generateDailyReportJob } from "./reportPipeline.js";
 import { runDigestInterpretationJob } from "./digestInterpretationPipeline.js";
+import { runCapabilityAiJob } from "./capabilityAiPipeline.js";
 
 // Refuse to run with a placeholder/short/reused secret or default production credentials (Phase 29 / A4).
 try {
@@ -193,12 +198,30 @@ digestInterpretationWorker.on("failed", (job, err) => {
     });
 });
 
+const capabilityAiWorker = createCapabilityAiWorker(async (job: Job<CapabilityAiJobPayload>) => {
+  const result = await runCapabilityAiJob(job.data);
+  console.log(`[capability-ai-worker] job=${job.id} organizationId=${job.data.organizationId} status=${result.status}`);
+  return result;
+});
+
+// A crash or stalled job must not leave the run RUNNING forever (the Features page would show it as in progress).
+capabilityAiWorker.on("failed", (job, err) => {
+  console.error(`[capability-ai-worker] job=${job?.id} FAILED:`, err.message);
+  const id = job?.data?.capabilityAiRunId;
+  const organizationId = job?.data?.organizationId;
+  if (!id || !organizationId) return;
+  getCapabilityAiRunForOrgOrThrow(organizationId, id)
+    .then((current) => (current.status !== "COMPLETED" && current.status !== "FAILED" ? markCapabilityAiRunFailed(id, err.message) : undefined))
+    .catch((markErr: unknown) => console.error(`[capability-ai-worker] failed to mark run ${id} as FAILED:`, markErr));
+});
+
 console.log("[worker] listening for monitoring jobs...");
 console.log("[ai-worker] listening for AI analysis jobs...");
 console.log("[report-worker] listening for daily report jobs...");
 console.log("[digest-interpretation-worker] listening for digest interpretation jobs...");
+console.log("[capability-ai-worker] listening for capability check jobs...");
 
 process.on("SIGTERM", async () => {
-  await Promise.all([worker.close(), aiWorker.close(), reportWorker.close(), digestInterpretationWorker.close()]);
+  await Promise.all([worker.close(), aiWorker.close(), reportWorker.close(), digestInterpretationWorker.close(), capabilityAiWorker.close()]);
   process.exit(0);
 });

@@ -14,6 +14,7 @@ export interface Limits {
   manualScansPerHour: number;
   aiAnalysesPerDay: number;
   aiDigestsPerDay: number;
+  aiCapabilityChecksPerDay: number;
   aiTestPerHour: number;
   smtpTestPerHour: number;
   competitorsPerOrg: number;
@@ -29,6 +30,7 @@ const DEFINITIONS: Record<keyof Limits, { env: string; fallback: number }> = {
   manualScansPerHour: { env: "CMA_LIMIT_MANUAL_SCANS_PER_HOUR", fallback: 20 },
   aiAnalysesPerDay: { env: "CMA_LIMIT_AI_ANALYSES_PER_DAY", fallback: 30 },
   aiDigestsPerDay: { env: "CMA_LIMIT_AI_DIGESTS_PER_DAY", fallback: 10 },
+  aiCapabilityChecksPerDay: { env: "CMA_LIMIT_AI_CAPABILITY_CHECKS_PER_DAY", fallback: 5 },
   aiTestPerHour: { env: "CMA_LIMIT_AI_TEST_PER_HOUR", fallback: 10 },
   smtpTestPerHour: { env: "CMA_LIMIT_SMTP_TEST_PER_HOUR", fallback: 10 },
   competitorsPerOrg: { env: "CMA_LIMIT_COMPETITORS_PER_ORG", fallback: 25 },

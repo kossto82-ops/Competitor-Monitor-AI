@@ -179,6 +179,9 @@ model Organization {
 
   // Phase 29 F1: which capability lists are read from the competitors' pages (see CAPABILITY_PACKS in core).
   capabilityPacks String[] @default(["general"])
+
+  customCapabilities CustomCapability[]
+  capabilityAiRuns   CapabilityAiRun[]
 }
 
 model User {
@@ -272,6 +275,10 @@ model MonitoredUrl {
   etag                    String?
   lastModifiedHeader      String?
   validatorsSetAt         DateTime?
+  // Phase 29 F3: the snapshot the on-demand AI capability check last read, and when. A page is read again only
+  // when it has a newer snapshot or the organization's own capabilities changed after that.
+  capabilityAiCheckedSnapshotId String?
+  capabilityAiCheckedAt         DateTime?
   createdAt               DateTime    @default(now())
   updatedAt               DateTime    @updatedAt
 
@@ -686,6 +693,48 @@ enum CapabilityState {
 enum CapabilityMethod {
   DETERMINISTIC
   AI
+}
+
+// Phase 29 F3: a capability the organization defined itself. Its key is "custom:<id>" in CapabilityObservation.
+// Phrases are matched literally by the deterministic rules; the description is what the on-demand AI check is asked.
+model CustomCapability {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  label          String
+  description    String
+  phrases        String[]     @default([])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@map("custom_capabilities")
+}
+
+// Phase 29 F3: one on-demand AI check of the competitors' pages for the capabilities the rules did not recognise.
+model CapabilityAiRun {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status         AiAnalysisStatus @default(PENDING)
+  requestedAt    DateTime         @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  pagesChecked   Int              @default(0)
+  /// Pages that were due but left for a next run, because one run reads a bounded batch.
+  pagesRemaining Int              @default(0)
+  findings       Int              @default(0)
+  rejectedCount  Int              @default(0)
+  failedPages    Int              @default(0)
+  provider       String?
+  model          String?
+  inputTokens    Int?
+  outputTokens   Int?
+  costUsd        Float?
+  errorMessage   String?
+
+  @@index([organizationId, requestedAt])
+  @@map("capability_ai_runs")
 }
 
 model CapabilityObservation {

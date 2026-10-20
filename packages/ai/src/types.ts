@@ -100,6 +100,8 @@ export interface AiProvider {
    * comment above for why the return shape is unchanged.
    */
   interpretDigest(input: EvidenceBundleInput): Promise<NormalizedAiResponse>;
+  /** Phase 29 F3: which of these capabilities does this page say the competitor offers? See capabilityClassification.ts. */
+  classifyCapabilities(input: import("./capabilityClassification.js").CapabilityClassificationInput): Promise<NormalizedAiResponse>;
 }
 
 /**

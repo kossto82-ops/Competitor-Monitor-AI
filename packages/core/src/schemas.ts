@@ -87,6 +87,14 @@ export const updateOrganizationSettingsInputSchema = z.object({
 });
 export type UpdateOrganizationSettingsInput = z.infer<typeof updateOrganizationSettingsInputSchema>;
 
+/** Phase 29 F3: a capability the organization defines itself. Phrases are literal text matched on pages; the description is what the AI check is asked. */
+export const customCapabilityInputSchema = z.object({
+  label: z.string().trim().min(2).max(60),
+  description: z.string().trim().min(5).max(240),
+  phrases: z.array(z.string().trim().min(3).max(60)).max(12).default([]),
+});
+export type CustomCapabilityValuesInput = z.infer<typeof customCapabilityInputSchema>;
+
 export const signupInputSchema = z.object({
   organizationName: z.string().min(1).max(200),
   email: z.string().email(),

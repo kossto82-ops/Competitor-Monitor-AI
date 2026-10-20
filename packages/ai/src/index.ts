@@ -42,3 +42,6 @@ export * from "./validateDigestInterpretation.js";
 export * from "./validateDigestClaimSafety.js";
 export * from "./interpretDigestWithRetry.js";
 export * from "./analyzeAndValidateDigest.js";
+
+// Phase 29 F3: on-demand classification of capabilities the deterministic rules did not recognise.
+export * from "./capabilityClassification.js";

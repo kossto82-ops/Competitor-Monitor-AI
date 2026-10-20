@@ -30,3 +30,10 @@ export {
 } from "./digestInterpretationQueue.js";
 
 export { addJobReplacingTerminal } from "./enqueueJob.js";
+
+export {
+  CAPABILITY_AI_QUEUE_NAME,
+  createCapabilityAiQueue,
+  createCapabilityAiWorker,
+  type CapabilityAiJobPayload,
+} from "./capabilityAiQueue.js";

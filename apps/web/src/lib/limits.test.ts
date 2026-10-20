@@ -10,6 +10,7 @@ describe("readLimits", () => {
       manualScansPerHour: 20,
       aiAnalysesPerDay: 30,
       aiDigestsPerDay: 10,
+      aiCapabilityChecksPerDay: 5,
       aiTestPerHour: 10,
       smtpTestPerHour: 10,
       competitorsPerOrg: 25,

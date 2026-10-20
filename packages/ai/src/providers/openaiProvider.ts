@@ -5,6 +5,13 @@ import { aiInterpretationOutputJsonSchema } from "../digestSchema.js";
 import { AiProviderRequestError, AiProviderTimeoutError } from "../errors.js";
 import { REQUEST_TIMEOUT_MS } from "../limits.js";
 import { DIGEST_REQUEST_TIMEOUT_MS } from "../digestLimits.js";
+import {
+  buildCapabilitySystemPrompt,
+  buildCapabilityUserPrompt,
+  capabilityClassificationJsonSchema,
+  CAPABILITY_REQUEST_TIMEOUT_MS,
+  type CapabilityClassificationInput,
+} from "../capabilityClassification.js";
 import type { AiProvider, ChangeAnalysisInput, EvidenceBundleInput, NormalizedAiResponse } from "../types.js";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
@@ -84,6 +91,11 @@ export class OpenAiProvider implements AiProvider {
   }
 
   /** Phase 11: same request/parse/error-classification machinery as analyzeChange, only the system/user prompt and structured-output schema differ. */
+  /** Phase 29 F3: the same request machinery, a different prompt and schema. */
+  async classifyCapabilities(input: CapabilityClassificationInput): Promise<NormalizedAiResponse> {
+    return this.request(buildCapabilitySystemPrompt(), buildCapabilityUserPrompt(input), "capability_classification_output", capabilityClassificationJsonSchema, CAPABILITY_REQUEST_TIMEOUT_MS);
+  }
+
   async interpretDigest(input: EvidenceBundleInput): Promise<NormalizedAiResponse> {
     return this.request(
       buildDigestSystemPrompt(),

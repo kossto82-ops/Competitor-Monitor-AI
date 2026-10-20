@@ -4,6 +4,7 @@ import { buildDigestSystemPrompt, buildDigestUserPrompt } from "../digestPrompt.
 import { AiProviderRequestError, AiProviderTimeoutError } from "../errors.js";
 import { REQUEST_TIMEOUT_MS } from "../limits.js";
 import { DIGEST_REQUEST_TIMEOUT_MS } from "../digestLimits.js";
+import { buildCapabilitySystemPrompt, buildCapabilityUserPrompt, CAPABILITY_REQUEST_TIMEOUT_MS, type CapabilityClassificationInput } from "../capabilityClassification.js";
 import type { AiProvider, ChangeAnalysisInput, EvidenceBundleInput, NormalizedAiResponse } from "../types.js";
 
 /**
@@ -64,6 +65,11 @@ export class OpenAiCompatibleProvider implements AiProvider {
   /** Phase 11: same request/parse/error-classification machinery as analyzeChange, only the system/user prompt differs. */
   async interpretDigest(input: EvidenceBundleInput): Promise<NormalizedAiResponse> {
     return this.request(buildDigestSystemPrompt(), buildDigestUserPrompt(input), DIGEST_REQUEST_TIMEOUT_MS);
+  }
+
+  /** Phase 29 F3: same machinery, different prompt. */
+  async classifyCapabilities(input: CapabilityClassificationInput): Promise<NormalizedAiResponse> {
+    return this.request(buildCapabilitySystemPrompt(), buildCapabilityUserPrompt(input), CAPABILITY_REQUEST_TIMEOUT_MS);
   }
 
   private async request(systemPrompt: string, userPrompt: string, timeoutMs: number): Promise<NormalizedAiResponse> {

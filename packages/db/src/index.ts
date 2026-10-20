@@ -27,3 +27,4 @@ export * from "./repositories/alertDelivery.js";
 export * from "./repositories/userSessions.js";
 export * from "./repositories/marketPatterns.js";
 export * from "./repositories/capabilities.js";
+export * from "./repositories/capabilityAi.js";

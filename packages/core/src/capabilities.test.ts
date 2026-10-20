@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CAPABILITY_TAXONOMY, capabilitiesOfPacks, detectCapabilities, DETERMINISTIC_CONFIDENCE, looksPartiallyLoaded, type CapabilityPack } from "./capabilities.js";
+import { CAPABILITY_TAXONOMY, capabilitiesOfPacks, customCapabilityDefinition, detectCapabilities, detectWithDefinitions, DETERMINISTIC_CONFIDENCE, looksPartiallyLoaded, type CapabilityPack } from "./capabilities.js";
 
 const BOTH: CapabilityPack[] = ["general", "call-answering"];
 const keys = (text: string, packs: CapabilityPack[] = BOTH) => detectCapabilities(text, packs).map((m) => m.key).sort();
@@ -79,6 +79,27 @@ describe("detectCapabilities (Phase 29 F1)", () => {
     expect(looksPartiallyLoaded("Please wait... we are preparing your page")).toBe(true);
     expect(looksPartiallyLoaded("Fast loading times and a load balancer for every plan")).toBe(false);
     expect(looksPartiallyLoaded("")).toBe(false);
+  });
+
+  it("runs an organization's own capability by its phrases, as literal text, with the page's sentence as evidence", () => {
+    const def = customCapabilityDefinition({ key: "custom:x1", label: "Answers in Catalan", description: "Takes calls in Catalan", phrases: ["en catalán", "C++ (beta)", "ab"] });
+    expect(def).toMatchObject({ key: "custom:x1", pack: "custom" });
+    expect(def.patterns).toHaveLength(2); // "ab" is too short to be a phrase
+    const hit = detectWithDefinitions("Atendemos EN   catalán y castellano. Compatible con C++ (beta).", [def]);
+    expect(hit).toHaveLength(1);
+    expect(hit[0]).toMatchObject({ key: "custom:x1", confidence: DETERMINISTIC_CONFIDENCE });
+    expect(hit[0]!.evidence).toContain("catalán");
+    expect(detectWithDefinitions("No atendemos en catalán.", [def])).toEqual([]); // a negation in the clause is not a claim
+    expect(detectWithDefinitions("C+ (beta)", [def])).toEqual([]); // regex characters are not operators
+    expect(detectWithDefinitions("anything", [customCapabilityDefinition({ key: "custom:x2", label: "Empty", description: "No phrases", phrases: [] })])).toEqual([]);
+  });
+
+  it("uses the edited phrases of a custom capability that keeps its key", () => {
+    const v1 = customCapabilityDefinition({ key: "custom:x3", label: "L", description: "d", phrases: ["alpha beta"] });
+    const v2 = customCapabilityDefinition({ key: "custom:x3", label: "L", description: "d", phrases: ["gamma delta"] });
+    expect(detectWithDefinitions("alpha beta", [v1])).toHaveLength(1);
+    expect(detectWithDefinitions("alpha beta", [v2])).toEqual([]);
+    expect(detectWithDefinitions("gamma delta", [v2])).toHaveLength(1);
   });
 
   it("has a consistent taxonomy: unique keys, a label, patterns that compile, and a pack and category each", () => {

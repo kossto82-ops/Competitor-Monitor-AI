@@ -16,7 +16,8 @@ export interface CapabilityDefinition {
   key: string;
   label: string;
   category: CapabilityCategory;
-  pack: CapabilityPack;
+  /** "custom": a capability the organization defined itself (Phase 29 F3). */
+  pack: CapabilityPack | "custom";
   /** Phrases that show it, in every language the product reads. Matched case-insensitively, as whole words. */
   patterns: string[];
   /**
@@ -89,10 +90,12 @@ function snippet(text: string, start: number, end: number): string {
 
 const compiled = new Map<string, RegExp>();
 function regexFor(definition: CapabilityDefinition): RegExp {
-  let re = compiled.get(definition.key);
+  // Keyed on the patterns too: an organization's own capability keeps its key while its phrases are edited.
+  const cacheKey = JSON.stringify([definition.key, definition.patterns]);
+  let re = compiled.get(cacheKey);
   if (!re) {
     re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${definition.patterns.join("|")})(?![\\p{L}\\p{N}])`, "giu");
-    compiled.set(definition.key, re);
+    compiled.set(cacheKey, re);
   }
   return re;
 }
@@ -100,9 +103,14 @@ function regexFor(definition: CapabilityDefinition): RegExp {
 /** The capabilities of the enabled packs that this text claims, each with the passage that shows it. */
 export function detectCapabilities(text: string, packs: readonly CapabilityPack[] = ["general"], taxonomy: readonly CapabilityDefinition[] = CAPABILITY_TAXONOMY): CapabilityMatch[] {
   const enabled = new Set<string>(packs);
+  return detectWithDefinitions(text, taxonomy.filter((d) => enabled.has(d.pack)));
+}
+
+/** The same rules for an explicit list of definitions (the organization's own capabilities, or any subset). */
+export function detectWithDefinitions(text: string, definitions: readonly CapabilityDefinition[]): CapabilityMatch[] {
   const found: CapabilityMatch[] = [];
-  for (const definition of taxonomy) {
-    if (!enabled.has(definition.pack)) continue;
+  for (const definition of definitions) {
+    if (definition.patterns.length === 0) continue;
     const re = regexFor(definition);
     re.lastIndex = 0;
     for (const match of text.matchAll(re)) {
@@ -121,6 +129,33 @@ export function detectCapabilities(text: string, packs: readonly CapabilityPack[
  */
 export function looksPartiallyLoaded(text: string): boolean {
   return /(?<![\p{L}])(?:loading content|loading\s*(?:\.{3}|\u2026)|please wait\s*(?:\.{3}|\u2026))/iu.test(text);
+}
+
+export const CUSTOM_CAPABILITY_KEY_PREFIX = "custom:";
+export const MAX_CUSTOM_CAPABILITIES = 20;
+export const MAX_CUSTOM_PHRASES = 12;
+export const MIN_CUSTOM_PHRASE_LENGTH = 3;
+
+export interface CustomCapabilityInput {
+  /** `custom:<id>`: stable, never reused, so renaming the label keeps its history. */
+  key: string;
+  label: string;
+  description: string;
+  /** Words or phrases the organization wants matched literally on pages. Optional: without them only the AI check can find it. */
+  phrases: string[];
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Turns an organization's own capability into a definition the deterministic rules can run. Its phrases are literal text, never patterns. */
+export function customCapabilityDefinition(input: CustomCapabilityInput): CapabilityDefinition {
+  const patterns = input.phrases
+    .map((p) => p.trim().replace(/\s+/g, " "))
+    .filter((p) => p.length >= MIN_CUSTOM_PHRASE_LENGTH)
+    .map((p) => escapeRegex(p).replace(/ /g, "\\s+"));
+  return { key: input.key, label: input.label, category: "SERVICE", pack: "custom", patterns, allowNegation: false };
 }
 
 export function capabilityByKey(key: string): CapabilityDefinition | undefined {
