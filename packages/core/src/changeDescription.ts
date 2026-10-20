@@ -37,6 +37,10 @@ export function describeChangeEvent(event: ChangeEventForDescription): string {
       return `A promotion changed from "${oldValue ?? "—"}" to "${newValue ?? "—"}"`;
     case "PROMOTION_REMOVED":
       return `A promotion is no longer listed (was "${oldValue ?? "—"}")`;
+    case "CAPABILITY_ADDED":
+      return `The page now says the service offers: ${newValue ?? "—"}`;
+    case "CAPABILITY_REMOVED":
+      return `The page no longer says the service offers: ${oldValue ?? "—"}`;
     case "CONTENT_CHANGE":
       return "The page's visible text changed";
     default:

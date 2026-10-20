@@ -115,6 +115,14 @@ export function detectCapabilities(text: string, packs: readonly CapabilityPack[
   return found;
 }
 
+/**
+ * A page that still shows a "Loading content..." stand-in was captured before all of it was built (Brevo serves
+ * its feature lists that way on some requests). What it does say is real; what it does not say proves nothing.
+ */
+export function looksPartiallyLoaded(text: string): boolean {
+  return /(?<![\p{L}])(?:loading content|loading\s*(?:\.{3}|\u2026)|please wait\s*(?:\.{3}|\u2026))/iu.test(text);
+}
+
 export function capabilityByKey(key: string): CapabilityDefinition | undefined {
   return CAPABILITY_TAXONOMY.find((c) => c.key === key);
 }

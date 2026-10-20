@@ -233,7 +233,7 @@ export async function runMonitoringJob(
       { recentEvents },
     );
 
-    await deps.persistMonitoringResult(job.id, {
+    const persisted = await deps.persistMonitoringResult(job.id, {
       organizationId: monitoredUrl.organizationId,
       monitoredUrlId: monitoredUrl.id,
       previousSnapshotId: priorSnapshot?.id ?? null,
@@ -245,7 +245,9 @@ export async function runMonitoringJob(
 
     // Alerts come from signals, and signals only from verified events: nothing to evaluate otherwise. A failure
     // here is logged and ignored, because the scan itself has already been recorded.
-    if (deps.raiseAlerts && comparison.changeEvents.length > 0) {
+    // Capability changes are raised while persisting, so they are not in `comparison.changeEvents`.
+    const capabilityEvents = (persisted as { capabilityEventCount?: number } | undefined)?.capabilityEventCount ?? 0;
+    if (deps.raiseAlerts && comparison.changeEvents.length + capabilityEvents > 0) {
       await deps.raiseAlerts(monitoredUrl.organizationId).catch((error) => console.error("[pipeline] raising alerts failed:", error instanceof Error ? error.message : error));
     }
 

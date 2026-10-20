@@ -116,6 +116,7 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
     });
 
     const createdEvents: Awaited<ReturnType<typeof tx.changeEvent.create>>[] = [];
+    let capabilityEventCount = 0;
     for (const draft of comparison.changeEvents) {
       const event = await tx.changeEvent.create({
         data: {
@@ -150,13 +151,17 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
       });
       // Phase 29 F1: what the page says the service can do, from the same verified text.
       const capabilitySource = await tx.monitoredUrl.findUniqueOrThrow({ where: { id: monitoredUrlId }, select: { competitorId: true } });
-      await recordCapabilityObservations(tx, {
+      const capabilityResult = await recordCapabilityObservations(tx, {
         organizationId,
         competitorId: capabilitySource.competitorId,
         monitoredUrlId,
         observedAt: snapshot.fetchedAt,
         text: extraction.normalizedContent,
+        // The first verified scan, or one that is a new baseline (extractor, market or layout changed), only sets the starting point.
+        change: { snapshotId: snapshot.id, previousSnapshotId, baseline: previousSnapshotId === null || /new baseline/i.test(comparison.reason ?? "") },
       });
+      capabilityEventCount = capabilityResult.events.length;
+      createdEvents.push(...capabilityResult.events);
       // Phase 29 D2: verified events are promoted to signals in the same transaction, by deterministic rules.
       if (createdEvents.length > 0) {
         const source = await tx.monitoredUrl.findUniqueOrThrow({ where: { id: monitoredUrlId }, select: { competitorId: true } });
@@ -208,7 +213,7 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
       },
     });
 
-    return snapshot;
+    return { ...snapshot, capabilityEventCount };
   });
 }
 

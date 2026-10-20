@@ -59,13 +59,13 @@ describe.skipIf(!reachable)("capability observations (Phase 29 F1)", () => {
     await observe(general, FILLER + TRANSFER);
     expect((await rows(general.url.id)).map((r) => r.capabilityKey)).toEqual(["support_24_7"]); // call-answering is not enabled
     const none = await makeSource([]);
-    expect(await observe(none, TRANSFER)).toEqual({ found: 0, becameAbsent: 0 });
+    expect(await observe(none, TRANSFER)).toMatchObject({ found: 0, becameAbsent: 0, events: [] });
   });
 
   it("does not call a capability gone after one bad capture, only after several verified scans in a row without it", async () => {
     const ids = await makeSource(["general", "call-answering"]);
     await observe(ids, TRANSFER);
-    expect(await observe(ids, "Page under maintenance. ".repeat(5))).toEqual({ found: 0, becameAbsent: 0 }); // first miss
+    expect(await observe(ids, "Page under maintenance. ".repeat(5))).toMatchObject({ found: 0, becameAbsent: 0 }); // first miss
     expect((await rows(ids.url.id)).every((r) => r.state === "PRESENT" && r.missCount === 1)).toBe(true);
     await observe(ids, TRANSFER); // it is back: the counter resets
     expect((await rows(ids.url.id)).every((r) => r.state === "PRESENT" && r.missCount === 0)).toBe(true);
@@ -141,6 +141,100 @@ describe.skipIf(!reachable)("capability observations (Phase 29 F1)", () => {
     expect((await rows(ids.url.id)).map((r) => r.capabilityKey)).toEqual(["call_transfer", "message_taking", "support_24_7"]);
     expect(await backfillCapabilityObservations(ids.organization.id)).toEqual({ pages: 0, snapshots: 0 });
     expect(await backfillCapabilityObservations(ids.organization.id, { force: true })).toEqual({ pages: 1, snapshots: 2 });
+  });
+
+  describe("changes of what a page claims (Phase 29 F2)", () => {
+    const FEATURES = "Prise de messages. Transfert d'appels vers votre mobile. Sans engagement. Essai gratuit.";
+
+    async function snapshotFor(ids: { organization: { id: string }; url: { id: string } }, text: string) {
+      const job = await prisma.monitoringJob.create({ data: { organizationId: ids.organization.id, monitoredUrlId: ids.url.id, status: "COMPLETED" } });
+      return prisma.snapshot.create({ data: { organizationId: ids.organization.id, monitoredUrlId: ids.url.id, monitoringJobId: job.id, extractionMethod: "CHEERIO", verificationState: "CHANGED", normalizedContent: text, confidence: 1 } });
+    }
+    async function scan(ids: { organization: { id: string }; competitor: { id: string }; url: { id: string } }, text: string, baseline = false, previous: string | null = "prev") {
+      const snapshot = await snapshotFor(ids, text);
+      return prisma.$transaction((tx) =>
+        recordCapabilityObservations(tx, {
+          organizationId: ids.organization.id,
+          competitorId: ids.competitor.id,
+          monitoredUrlId: ids.url.id,
+          observedAt: new Date(),
+          text,
+          change: { snapshotId: snapshot.id, previousSnapshotId: previous === null ? null : snapshot.id, baseline },
+        }),
+      );
+    }
+    const GONE = "Nothing about the service on this page. ";
+
+    it("raises nothing for the first scan of a page or for a baseline, but records what it found", async () => {
+      const ids = await makeSource(["general", "call-answering"]);
+      expect((await scan(ids, FEATURES, true, null)).events).toEqual([]);
+      expect((await rows(ids.url.id)).length).toBeGreaterThan(0);
+      const other = await makeSource(["general", "call-answering"]);
+      expect((await scan(other, FEATURES, true)).events).toEqual([]);
+    });
+
+    it("raises a verified change event, with the passage, when a page starts to claim something new", async () => {
+      const ids = await makeSource(["general", "call-answering"]);
+      await scan(ids, "Prise de messages. Sans engagement.", true, null);
+      const result = await scan(ids, "Prise de messages. Sans engagement. Disponible 24h/24.");
+      expect(result.events).toHaveLength(1);
+      expect(result.events[0]).toMatchObject({ changeType: "CAPABILITY_ADDED", severity: "LOW", entityKey: "capability:support_24_7", fieldPath: "capability:support_24_7", oldValue: null, newValue: "Support or availability 24/7", confidence: 0.85 });
+      expect(result.events[0]!.evidenceExcerpt).toContain("24h/24");
+      expect((await scan(ids, "Prise de messages. Sans engagement. Disponible 24h/24.")).events).toEqual([]); // still there: nothing new
+    });
+
+    it("raises a removal only after the page stopped saying it for several verified scans, and an addition again when it returns", async () => {
+      const ids = await makeSource(["general", "call-answering"]);
+      await scan(ids, "Transfert d'appels vers votre mobile.", true, null);
+      expect((await scan(ids, GONE)).events).toEqual([]); // one miss is not a removal
+      const removal = await scan(ids, GONE);
+      expect(removal.events).toHaveLength(1);
+      expect(removal.events[0]).toMatchObject({ changeType: "CAPABILITY_REMOVED", oldValue: "Call transfer", newValue: null });
+      expect(removal.events[0]!.evidenceExcerpt).toContain("stopped saying this after 2 verified scans");
+      const back = await scan(ids, "Transfert d'appels vers votre mobile.");
+      expect(back.events.map((e) => e.changeType)).toEqual(["CAPABILITY_ADDED"]);
+    });
+
+    it("takes nothing from a page captured half-built: no misses counted and no change raised, while what it does say is kept", async () => {
+      const ids = await makeSource(["general", "call-answering"]);
+      await scan(ids, "Transfert d'appels vers votre mobile. Prise de messages.", true, null);
+      for (let i = 0; i < 3; i += 1) expect((await scan(ids, "Compare plans Loading content...")).events).toEqual([]);
+      expect((await rows(ids.url.id)).every((r) => r.state === "PRESENT" && r.missCount === 0)).toBe(true); // three half-built captures removed nothing
+      expect((await scan(ids, "Loading content... Disponible 24h/24.")).events).toEqual([]); // and a new claim seen in one is recorded, not announced
+      expect((await rows(ids.url.id)).map((r) => r.capabilityKey)).toContain("support_24_7");
+    });
+
+    it("does not raise a wave: four or more capabilities moving at once is a different page, not a different offer", async () => {
+      const ids = await makeSource(["general", "call-answering"]);
+      await scan(ids, "Intro.", true, null);
+      const wave = await scan(ids, "Prise de messages. Transfert d'appels. Sans engagement. Essai gratuit. Disponible 24h/24. Gestion des urgences.");
+      expect(wave.events).toEqual([]);
+      expect((await rows(ids.url.id)).length).toBeGreaterThanOrEqual(5); // the observations are still kept
+    });
+
+    it("becomes a signal through the pipeline, once the page is past its baseline", async () => {
+      const ids = await makeSource(["general", "call-answering"]);
+      const run = async (text: string, previousSnapshotId: string | null, reason = "Content differs.") => {
+        const job = await createRunningMonitoringJob(ids.organization.id, ids.url.id);
+        return persistMonitoringResult(job.id, {
+          organizationId: ids.organization.id,
+          monitoredUrlId: ids.url.id,
+          previousSnapshotId,
+          extraction: { method: "CHEERIO", requestedUrl: "https://x.test/", finalUrl: "https://x.test/", httpStatus: 200, errorMessage: null, normalizedContent: text, contentHash: "h", structuredDataHash: null, extractedEntities: [], confidence: 1, warnings: [], durationMs: 1 } as ExtractionResult,
+          comparison: { verificationState: "CHANGED", reason, changeEvents: [] } as unknown as ComparisonResult,
+          usage,
+        });
+      };
+      const first = await run("Prise de messages.", null);
+      expect(first.capabilityEventCount).toBe(0);
+      const reread = await run("Prise de messages. Disponible 24h/24.", first.id, "Extraction logic changed (v9 -> v10); this scan is the new baseline, not a page change.");
+      expect(reread.capabilityEventCount).toBe(0); // a different reading of the page, not a change of the offer
+      const second = await run("Prise de messages. Disponible 24h/24. Transfert d'appels.", reread.id);
+      expect(second.capabilityEventCount).toBe(1);
+      const signals = await prisma.signal.findMany({ where: { organizationId: ids.organization.id } });
+      expect(signals).toHaveLength(1);
+      expect(signals[0]).toMatchObject({ kind: "CAPABILITY_ADDED", title: "Now says it offers: Call transfer", epistemicLevel: "FACT", ruleId: "capability-change" });
+    });
   });
 
   it("is tenant-scoped and lets the packs be changed through the settings", async () => {

@@ -39,6 +39,8 @@ export const DEFAULT_IMPORTANCE_CONFIG: ImportanceConfig = {
     PROMOTION_CHANGED: 0.6,
     PROMOTION_ENDED: 0.5,
     CONTENT_UPDATE: 0.15,
+    CAPABILITY_ADDED: 0.5,
+    CAPABILITY_REMOVED: 0.45,
   },
   tiers: { high: 65, medium: 40 },
   recencyHalfLifeDays: 7,
@@ -119,6 +121,9 @@ function magnitudeOf(signal: SignalForScoring): { value: number; explanation: st
     case "PROMOTION_CHANGED":
     case "PROMOTION_ENDED":
       return { value: 0.5, explanation: "A promotion is temporary and narrower than a price or plan change." };
+    case "CAPABILITY_ADDED":
+    case "CAPABILITY_REMOVED":
+      return { value: 0.5, explanation: "A change in what the page says the service offers; the claim, not necessarily the service." };
     case "CONTENT_UPDATE":
       return { value: 0.1, explanation: "A text change that no price, plan or promotion explains." };
   }

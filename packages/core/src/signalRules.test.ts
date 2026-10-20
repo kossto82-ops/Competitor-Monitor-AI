@@ -77,6 +77,22 @@ describe("deriveSignals (Phase 29 D2)", () => {
     expect(deriveSignals([...wave(3), event({ id: "x", monitoredUrlId: "u2", changeType: "PRODUCT_REMOVED", entityKey: "plan:z", percentageChange: null })]).drafts).toHaveLength(4);
   });
 
+  it("promotes a capability the page now claims or no longer claims, named by its label", () => {
+    const added = deriveSignals([event({ id: "c1", changeType: "CAPABILITY_ADDED", entityKey: "capability:support_24_7", oldValue: null, newValue: "Support or availability 24/7", percentageChange: null, confidence: 0.85 })]);
+    expect(added.drafts[0]).toMatchObject({ kind: "CAPABILITY_ADDED", ruleId: "capability-change", title: "Now says it offers: Support or availability 24/7", dedupeKey: "capability:c1", epistemicLevel: "FACT" });
+    expect(added.drafts[0]!.summary).toBe("The page now says the service offers: Support or availability 24/7");
+    const removed = deriveSignals([event({ id: "c2", changeType: "CAPABILITY_REMOVED", entityKey: "capability:call_transfer", oldValue: "Call transfer", newValue: null, percentageChange: null, confidence: 0.85 })]);
+    expect(removed.drafts[0]).toMatchObject({ kind: "CAPABILITY_REMOVED", title: "No longer says it offers: Call transfer" });
+    expect(deriveSignals([event({ id: "c3", changeType: "CAPABILITY_ADDED", newValue: "X", confidence: 0.4 })]).drafts).toEqual([]);
+  });
+
+  it("does not promote a wave of capabilities changing on one source in one scan", () => {
+    const wave = Array.from({ length: 4 }, (_, i) => event({ id: `w${i}`, changeType: "CAPABILITY_ADDED", entityKey: `capability:k${i}`, newValue: `K${i}`, percentageChange: null, confidence: 0.85 }));
+    const result = deriveSignals(wave);
+    expect(result.drafts).toEqual([]);
+    expect(result.skipped[0]?.reason).toContain("4 plans of one source");
+  });
+
   it("promotes promotion events by their kind", () => {
     const kinds = (changeType: string) => deriveSignals([event({ changeType, entityKey: "promo:trial", oldValue: null, newValue: "14 days free", percentageChange: null })]).drafts[0]?.kind;
     expect(kinds("PROMOTION_ADDED")).toBe("PROMOTION_STARTED");

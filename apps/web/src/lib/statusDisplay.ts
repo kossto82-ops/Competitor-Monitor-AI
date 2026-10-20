@@ -95,6 +95,10 @@ export function changeTypeDisplay(changeType: string): { label: string; tone: Ba
       return { label: "Promotion changed", tone: "blue" };
     case "PROMOTION_REMOVED":
       return { label: "Promotion removed", tone: "red" };
+    case "CAPABILITY_ADDED":
+      return { label: "Capability added", tone: "green" };
+    case "CAPABILITY_REMOVED":
+      return { label: "Capability removed", tone: "amber" };
     case "CONTENT_CHANGE":
       return { label: "Content change", tone: "gray" };
     default:

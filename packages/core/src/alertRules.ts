@@ -29,12 +29,14 @@ export interface AlertRuleSpec {
 const PRICE_KINDS: SignalKind[] = ["PRICE_INCREASE", "PRICE_DECREASE"];
 const PLAN_KINDS: SignalKind[] = ["PLAN_ADDED", "PLAN_REMOVED"];
 const PROMOTION_KINDS: SignalKind[] = ["PROMOTION_STARTED", "PROMOTION_CHANGED", "PROMOTION_ENDED"];
+const CAPABILITY_KINDS: SignalKind[] = ["CAPABILITY_ADDED", "CAPABILITY_REMOVED"];
 
 /** What applies until an organization defines its own rules. Text-only changes never alert by default. */
 export const DEFAULT_ALERT_RULES: AlertRuleSpec[] = [
   { id: "default-urgent-price", name: "Very large price change", level: "URGENT", minImportance: 80, minConfidence: 0.7, kinds: PRICE_KINDS, enabled: true },
   { id: "default-important-price-plan", name: "Important price or plan change", level: "IMPORTANT", minImportance: 65, minConfidence: 0.6, kinds: [...PRICE_KINDS, ...PLAN_KINDS], enabled: true },
   { id: "default-notice-promotion", name: "Promotion change", level: "NOTICE", minImportance: 40, minConfidence: 0.6, kinds: PROMOTION_KINDS, enabled: true },
+  { id: "default-notice-capability", name: "Change in what a competitor says it offers", level: "NOTICE", minImportance: 40, minConfidence: 0.6, kinds: CAPABILITY_KINDS, enabled: true },
 ];
 
 /** A repeat of the same thing (same page, same plan, same kind) within this many hours joins the open alert. */

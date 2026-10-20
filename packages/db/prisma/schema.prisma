@@ -73,6 +73,9 @@ enum ChangeType {
   // the same commercial entity.
   PROMOTION_REMOVED
   CONTENT_CHANGE
+  // Phase 29 F2: the page now says (or stopped saying) that the service offers something.
+  CAPABILITY_ADDED
+  CAPABILITY_REMOVED
 }
 
 enum Severity {
@@ -444,6 +447,8 @@ enum SignalKind {
   PROMOTION_CHANGED
   PROMOTION_ENDED
   CONTENT_UPDATE
+  CAPABILITY_ADDED
+  CAPABILITY_REMOVED
 }
 
 enum EpistemicLevel {

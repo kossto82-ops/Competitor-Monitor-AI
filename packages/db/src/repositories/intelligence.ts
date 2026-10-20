@@ -35,6 +35,8 @@ const CHANGE_TYPES: ChangeType[] = [
   "PROMOTION_CHANGE",
   "PROMOTION_REMOVED",
   "CONTENT_CHANGE",
+  "CAPABILITY_ADDED",
+  "CAPABILITY_REMOVED",
 ];
 
 export interface ChangeTypeBreakdown {

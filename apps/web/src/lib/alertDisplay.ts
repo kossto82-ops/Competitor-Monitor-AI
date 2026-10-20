@@ -26,6 +26,8 @@ const KIND_LABEL: Record<SignalKind, string> = {
   PROMOTION_CHANGED: "Promotion changed",
   PROMOTION_ENDED: "Promotion ended",
   CONTENT_UPDATE: "Text changed",
+  CAPABILITY_ADDED: "Offers something new",
+  CAPABILITY_REMOVED: "Stopped saying it offers",
 };
 
 export function signalKindLabel(kind: string): string {

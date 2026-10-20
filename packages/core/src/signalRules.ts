@@ -21,6 +21,8 @@ export const SIGNAL_KINDS = [
   "PROMOTION_CHANGED",
   "PROMOTION_ENDED",
   "CONTENT_UPDATE",
+  "CAPABILITY_ADDED",
+  "CAPABILITY_REMOVED",
 ] as const;
 export type SignalKind = (typeof SIGNAL_KINDS)[number];
 
@@ -34,6 +36,7 @@ export const SIGNAL_RULE_VERSIONS = {
   "plan-added-removed": 1,
   "promotion-change": 1,
   "content-update": 1,
+  "capability-change": 1,
 } as const;
 export type SignalRuleId = keyof typeof SIGNAL_RULE_VERSIONS;
 
@@ -144,7 +147,7 @@ export function deriveSignals(events: EventForSignal[], labels: ReadonlyMap<stri
 
   const planChangesPerSource = new Map<string, number>();
   for (const event of events) {
-    if (event.changeType === "PRODUCT_ADDED" || event.changeType === "PRODUCT_REMOVED") {
+    if (event.changeType === "PRODUCT_ADDED" || event.changeType === "PRODUCT_REMOVED" || event.changeType === "CAPABILITY_ADDED" || event.changeType === "CAPABILITY_REMOVED") {
       const k = `${event.monitoredUrlId}|${event.changeType}`;
       planChangesPerSource.set(k, (planChangesPerSource.get(k) ?? 0) + 1);
     }
@@ -203,6 +206,17 @@ export function deriveSignals(events: EventForSignal[], labels: ReadonlyMap<stri
               ? (["PROMOTION_CHANGED", "changed"] as const)
               : (["PROMOTION_ENDED", "ended"] as const);
         result.drafts.push(draftOf(event, "promotion-change", kind, `promotion:${event.id}`, `Promotion ${verb}: ${name}`));
+        break;
+      }
+      case "CAPABILITY_ADDED":
+      case "CAPABILITY_REMOVED": {
+        if (event.confidence < MIN_ENTITY_SIGNAL_CONFIDENCE) {
+          skip(event, `confidence ${event.confidence} is below ${MIN_ENTITY_SIGNAL_CONFIDENCE}`);
+          break;
+        }
+        const added = event.changeType === "CAPABILITY_ADDED";
+        const what = (added ? event.newValue : event.oldValue) ?? name;
+        result.drafts.push(draftOf(event, "capability-change", added ? "CAPABILITY_ADDED" : "CAPABILITY_REMOVED", `capability:${event.id}`, added ? `Now says it offers: ${what}` : `No longer says it offers: ${what}`));
         break;
       }
       case "CONTENT_CHANGE": {

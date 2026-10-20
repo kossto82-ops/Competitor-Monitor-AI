@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CAPABILITY_TAXONOMY, capabilitiesOfPacks, detectCapabilities, DETERMINISTIC_CONFIDENCE, type CapabilityPack } from "./capabilities.js";
+import { CAPABILITY_TAXONOMY, capabilitiesOfPacks, detectCapabilities, DETERMINISTIC_CONFIDENCE, looksPartiallyLoaded, type CapabilityPack } from "./capabilities.js";
 
 const BOTH: CapabilityPack[] = ["general", "call-answering"];
 const keys = (text: string, packs: CapabilityPack[] = BOTH) => detectCapabilities(text, packs).map((m) => m.key).sort();
@@ -71,6 +71,14 @@ describe("detectCapabilities (Phase 29 F1)", () => {
     expect(keys("Welcome to our site. Contact us for more information.")).toEqual([]);
     const twice = detectCapabilities("24/7 support. We are available 24/7.", ["general"]);
     expect(twice.filter((m) => m.key === "support_24_7")).toHaveLength(1);
+  });
+
+  it("recognises a page that was captured before it was fully built", () => {
+    expect(looksPartiallyLoaded("Compare plans Loading content... Starter Sign up")).toBe(true);
+    expect(looksPartiallyLoaded("Loading…")).toBe(true);
+    expect(looksPartiallyLoaded("Please wait... we are preparing your page")).toBe(true);
+    expect(looksPartiallyLoaded("Fast loading times and a load balancer for every plan")).toBe(false);
+    expect(looksPartiallyLoaded("")).toBe(false);
   });
 
   it("has a consistent taxonomy: unique keys, a label, patterns that compile, and a pack and category each", () => {

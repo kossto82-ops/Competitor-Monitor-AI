@@ -1,7 +1,10 @@
 import {
   CAPABILITY_MISSES_BEFORE_ABSENT,
   CAPABILITY_PACKS,
+  MASS_PLAN_CHANGE_THRESHOLD,
+  looksPartiallyLoaded,
   capabilitiesOfPacks,
+  capabilityByKey,
   detectCapabilities,
   type CapabilityCategory,
   type CapabilityPack,
@@ -24,12 +27,25 @@ function packsOf(value: string[] | null | undefined): CapabilityPack[] {
  */
 export async function recordCapabilityObservations(
   tx: Tx,
-  input: { organizationId: string; competitorId: string; monitoredUrlId: string; observedAt: Date; text: string },
-): Promise<{ found: number; becameAbsent: number }> {
-  const { organizationId, competitorId, monitoredUrlId, observedAt, text } = input;
+  input: {
+    organizationId: string;
+    competitorId: string;
+    monitoredUrlId: string;
+    observedAt: Date;
+    text: string;
+    /**
+     * Phase 29 F2: with a snapshot, a capability that appears or is gone becomes a verified ChangeEvent, unless
+     * this scan is a baseline (the first one of the page, or one after the extractor or market changed: what
+     * looks like a change is only a different reading) or so many capabilities moved at once that the page
+     * changed layout rather than its offer. Without a snapshot (a backfill) only the observations are written.
+     */
+    change?: { snapshotId: string; previousSnapshotId: string | null; baseline: boolean };
+  },
+): Promise<{ found: number; becameAbsent: number; events: Awaited<ReturnType<Tx["changeEvent"]["create"]>>[] }> {
+  const { organizationId, competitorId, monitoredUrlId, observedAt, text, change } = input;
   const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { capabilityPacks: true } });
   const packs = packsOf(org?.capabilityPacks);
-  if (packs.length === 0) return { found: 0, becameAbsent: 0 };
+  if (packs.length === 0) return { found: 0, becameAbsent: 0, events: [] };
 
   const enabledKeys = new Set(capabilitiesOfPacks(packs).map((c) => c.key));
   const matches = detectCapabilities(text, packs);
@@ -37,9 +53,12 @@ export async function recordCapabilityObservations(
   const existing = await tx.capabilityObservation.findMany({ where: { monitoredUrlId } });
   const existingByKey = new Map(existing.map((e) => [e.capabilityKey, e]));
   let becameAbsent = 0;
+  const appeared: { key: string; evidence: string; confidence: number }[] = [];
+  const disappeared: { key: string; evidence: string; confidence: number }[] = [];
 
   for (const match of matches) {
     const row = existingByKey.get(match.key);
+    if (!row || row.state === "ABSENT") appeared.push({ key: match.key, evidence: match.evidence, confidence: match.confidence });
     if (!row) {
       await tx.capabilityObservation.create({
         data: { organizationId, competitorId, monitoredUrlId, capabilityKey: match.key, confidence: match.confidence, evidence: match.evidence, firstSeenAt: observedAt, lastSeenAt: observedAt },
@@ -51,14 +70,50 @@ export async function recordCapabilityObservations(
       });
     }
   }
+  // A partly built page proves nothing by what it lacks: no misses are counted and no change is raised from it.
+  const partial = looksPartiallyLoaded(text);
   for (const row of existing) {
-    if (matched.has(row.capabilityKey) || !enabledKeys.has(row.capabilityKey) || row.state === "ABSENT") continue;
+    if (partial || matched.has(row.capabilityKey) || !enabledKeys.has(row.capabilityKey) || row.state === "ABSENT") continue;
     const missCount = row.missCount + 1;
     const gone = missCount >= CAPABILITY_MISSES_BEFORE_ABSENT;
     await tx.capabilityObservation.update({ where: { id: row.id }, data: gone ? { missCount, state: "ABSENT", absentSince: observedAt } : { missCount } });
-    if (gone) becameAbsent += 1;
+    if (gone) {
+      becameAbsent += 1;
+      disappeared.push({ key: row.capabilityKey, evidence: row.evidence, confidence: row.confidence });
+    }
   }
-  return { found: matches.length, becameAbsent };
+
+  const events: Awaited<ReturnType<Tx["changeEvent"]["create"]>>[] = [];
+  if (change && !change.baseline && !partial) {
+    const emit = async (kind: "CAPABILITY_ADDED" | "CAPABILITY_REMOVED", item: { key: string; evidence: string; confidence: number }) => {
+      const label = capabilityByKey(item.key)?.label ?? item.key;
+      events.push(
+        await tx.changeEvent.create({
+          data: {
+            organizationId,
+            monitoredUrlId,
+            currentSnapshotId: change.snapshotId,
+            previousSnapshotId: change.previousSnapshotId,
+            changeType: kind,
+            severity: "LOW",
+            confidence: item.confidence,
+            entityKey: `capability:${item.key}`,
+            fieldPath: `capability:${item.key}`,
+            oldValue: kind === "CAPABILITY_REMOVED" ? label : null,
+            newValue: kind === "CAPABILITY_ADDED" ? label : null,
+            evidenceExcerpt:
+              kind === "CAPABILITY_ADDED"
+                ? `The page now says: "${item.evidence}"`
+                : `The page stopped saying this after ${CAPABILITY_MISSES_BEFORE_ABSENT} verified scans in a row. It used to say: "${item.evidence}"`,
+          },
+        }),
+      );
+    };
+    // Many at once is a different page, not a different offer: the observations above stay, the events are not raised.
+    if (appeared.length < MASS_PLAN_CHANGE_THRESHOLD) for (const item of appeared) await emit("CAPABILITY_ADDED", item);
+    if (disappeared.length < MASS_PLAN_CHANGE_THRESHOLD) for (const item of disappeared) await emit("CAPABILITY_REMOVED", item);
+  }
+  return { found: matches.length, becameAbsent, events };
 }
 
 export interface CapabilityCell {
