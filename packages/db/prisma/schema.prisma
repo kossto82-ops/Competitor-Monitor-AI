@@ -173,6 +173,9 @@ model Organization {
   // Phase 29 D5b: email an alert when it reaches this level (never below it); the Today page shows all of them.
   alertEmailsEnabled Boolean    @default(true)
   alertEmailMinLevel AlertLevel @default(IMPORTANT)
+
+  // Phase 29 F1: which capability lists are read from the competitors' pages (see CAPABILITY_PACKS in core).
+  capabilityPacks String[] @default(["general"])
 }
 
 model User {
@@ -280,6 +283,7 @@ model MonitoredUrl {
   entities Entity[]
   signals  Signal[]
   alerts   AlertEvent[]
+  capabilityObservations CapabilityObservation[]
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +668,42 @@ model MarketPatternEvidence {
   @@unique([patternId, signalId])
   @@index([signalId])
   @@map("market_pattern_evidence")
+}
+
+// Phase 29 F1: what a competitor's page says its service can do, found by deterministic rules and kept with the
+// passage that shows it. "Not found" means the page does not say so, never that the competitor lacks it: a
+// capability only turns ABSENT after it was missing from CAPABILITY_MISSES_BEFORE_ABSENT verified scans in a row.
+enum CapabilityState {
+  PRESENT
+  ABSENT
+}
+
+enum CapabilityMethod {
+  DETERMINISTIC
+  AI
+}
+
+model CapabilityObservation {
+  id             String       @id @default(cuid())
+  organizationId String
+  competitorId   String
+  monitoredUrlId String
+  monitoredUrl   MonitoredUrl @relation(fields: [monitoredUrlId], references: [id], onDelete: Cascade)
+
+  capabilityKey String
+  state         CapabilityState  @default(PRESENT)
+  method        CapabilityMethod @default(DETERMINISTIC)
+  confidence    Float
+  evidence      String
+  missCount     Int              @default(0)
+
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+  absentSince DateTime?
+
+  @@unique([monitoredUrlId, capabilityKey])
+  @@index([organizationId, competitorId])
+  @@map("capability_observations")
 }
 
 model SignalEvidence {

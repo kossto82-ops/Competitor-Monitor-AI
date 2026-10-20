@@ -77,6 +77,8 @@ export const updateOrganizationSettingsInputSchema = z.object({
   dailyReportEnabled: z.boolean().optional(),
   /** Phase 29 D5b: email alerts as they are raised, from this level up. */
   alertEmailsEnabled: z.boolean().optional(),
+  /** Phase 29 F1: the capability lists read from the competitors' pages. */
+  capabilityPacks: z.array(z.enum(["general", "call-answering"])).min(1).max(2).optional(),
   alertEmailMinLevel: z.enum(["URGENT", "IMPORTANT", "NOTICE"]).optional(),
   /** Empty string clears the override, reverting to the OWNER's email. */
   reportRecipientEmail: z.union([z.string().email(), z.literal("")]).optional(),

@@ -15,3 +15,4 @@ export * from "./alertRules.js";
 export * from "./alertDelivery.js";
 export * from "./permissions.js";
 export * from "./marketPatterns.js";
+export * from "./capabilities.js";

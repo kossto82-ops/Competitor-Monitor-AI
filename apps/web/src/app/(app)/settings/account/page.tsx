@@ -3,6 +3,7 @@ import { getOrganizationById, getUserForOrg } from "@cma/db";
 import { getSession } from "@/lib/currentSession";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { MarketSettingsForm } from "@/components/app/MarketSettingsForm";
+import { CapabilityPacksForm } from "@/components/app/CapabilityPacksForm";
 import { Alert } from "@/components/ui/Alert";
 
 export default async function AccountSettingsPage() {
@@ -36,7 +37,10 @@ export default async function AccountSettingsPage() {
       </Card>
 
       {can(session.role, "manage_org_settings") ? (
-        <MarketSettingsForm initialLocale={organization?.marketLocale ?? null} />
+        <>
+          <MarketSettingsForm initialLocale={organization?.marketLocale ?? null} />
+          <CapabilityPacksForm initialPacks={(organization?.capabilityPacks ?? ["general"]).filter((p): p is "general" | "call-answering" => p === "general" || p === "call-answering")} />
+        </>
       ) : (
         <Alert tone="info">Only {whoCan("manage_org_settings")} can change the market the competitors' pages are read in (now: {organization?.marketLocale ?? "the sites' default"}).</Alert>
       )}

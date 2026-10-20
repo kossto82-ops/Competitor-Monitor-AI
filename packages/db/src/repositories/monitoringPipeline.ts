@@ -2,6 +2,7 @@ import type { ComparisonResult, ExtractionResult } from "@cma/core";
 import { prisma } from "../client.js";
 import { recordEntityObservations } from "./entityHistory.js";
 import { promoteSignals } from "./signals.js";
+import { recordCapabilityObservations } from "./capabilities.js";
 
 export async function createRunningMonitoringJob(organizationId: string, monitoredUrlId: string) {
   return prisma.monitoringJob.create({
@@ -146,6 +147,15 @@ export async function persistMonitoringResult(jobId: string, input: PersistMonit
         observedAt: snapshot.fetchedAt,
         entities: extraction.extractedEntities,
         events: createdEvents,
+      });
+      // Phase 29 F1: what the page says the service can do, from the same verified text.
+      const capabilitySource = await tx.monitoredUrl.findUniqueOrThrow({ where: { id: monitoredUrlId }, select: { competitorId: true } });
+      await recordCapabilityObservations(tx, {
+        organizationId,
+        competitorId: capabilitySource.competitorId,
+        monitoredUrlId,
+        observedAt: snapshot.fetchedAt,
+        text: extraction.normalizedContent,
       });
       // Phase 29 D2: verified events are promoted to signals in the same transaction, by deterministic rules.
       if (createdEvents.length > 0) {
